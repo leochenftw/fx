@@ -1,0 +1,25 @@
+{
+  "name": "fx",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "cd cdk && npx cdk deploy --outputs-file ./cdk-exports.json --profile fx && node ./scripts/post-deploy.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1084.0",
+    "@aws-sdk/client-dynamodb": "^3.1079.0",
+    "@aws-sdk/lib-dynamodb": "^3.1079.0",
+    "aws-jwt-verify": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.162",
+    "@types/node": "^26.1.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3"
+  }
+}
