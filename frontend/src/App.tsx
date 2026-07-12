@@ -17,6 +17,12 @@ import { OrgEditPage } from './pages/OrgEditPage';
 import { StaffListPage } from './pages/StaffListPage';
 import { StaffDetailPage } from './pages/StaffDetailPage';
 import { StaffEditPage } from './pages/StaffEditPage';
+import { TransactionsPage } from './pages/TransactionsPage';
+import { InvoicesPage } from './pages/InvoicesPage';
+import { BillsPage } from './pages/BillsPage';
+import { ReportsPage } from './pages/ReportsPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { SupportPage } from './pages/SupportPage';
 
 // Import Components
 import { Header } from './components/Header';
@@ -442,6 +448,54 @@ export default function App() {
             element={
               <AppLayout onLogout={handleLogout}>
                 <StaffEditPage />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/transactions"
+            element={
+              <AppLayout onLogout={handleLogout}>
+                <TransactionsPage />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/invoices"
+            element={
+              <AppLayout onLogout={handleLogout}>
+                <InvoicesPage />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/bills"
+            element={
+              <AppLayout onLogout={handleLogout}>
+                <BillsPage />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <AppLayout onLogout={handleLogout}>
+                <ReportsPage />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <AppLayout onLogout={handleLogout}>
+                <SettingsPage />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/support"
+            element={
+              <AppLayout onLogout={handleLogout}>
+                <SupportPage />
               </AppLayout>
             }
           />
