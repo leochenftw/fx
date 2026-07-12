@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CognitoUserPool, CognitoUser } from 'amazon-cognito-identity-js';
 import { cognitoConfig } from './cognitoConfig';
+import { orgApi } from './api/orgs';
 
 // Import Pages
 import { LoginPage } from './pages/LoginPage';
@@ -152,27 +153,16 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const activeToken = await getValidToken();
-      const res = await fetch(`${cognitoConfig.OrgsApiUrl}bootstrap`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${activeToken}`,
-        },
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        localStorage.setItem('genesis_done', String(data.genesis_done));
-        if (data.config && data.config.gst_rate !== undefined) {
-          localStorage.setItem('default_gst_rate', String(data.config.gst_rate));
-        }
-        setShowSetup(!data.genesis_done);
-      } else {
-        throw new Error(data.error || 'Failed to bootstrap configurations.');
+      const data = await orgApi.bootstrap();
+      localStorage.setItem('genesis_done', String(data.genesis_done));
+      if (data.config && data.config.gst_rate !== undefined) {
+        localStorage.setItem('default_gst_rate', String(data.config.gst_rate));
       }
-    } catch (err: any) {
+      setShowSetup(!data.genesis_done);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Server configuration error';
       console.error('[Bootstrap] Failed to fetch server configurations:', err);
-      setError(err.message || 'Server configuration error');
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -245,29 +235,18 @@ export default function App() {
     setError(null);
     setOrgsLastKey(null);
     try {
-      const activeToken = await getValidToken();
-      const res = await fetch(`${cognitoConfig.OrgsApiUrl}orgs`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${activeToken}`,
-        },
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setOrgs(data.orgs || []);
-        setOrgsLastKey(data.lastKey || null);
-        const isGenesisDone = localStorage.getItem('genesis_done') === 'true';
-        if (!isGenesisDone && (!data.orgs || data.orgs.length === 0)) {
-          setShowSetup(true);
-        } else {
-          setShowSetup(false);
-        }
+      const data = await orgApi.list();
+      setOrgs(data.orgs || []);
+      setOrgsLastKey(data.lastKey || null);
+      const isGenesisDone = localStorage.getItem('genesis_done') === 'true';
+      if (!isGenesisDone && (!data.orgs || data.orgs.length === 0)) {
+        setShowSetup(true);
       } else {
-        throw new Error(data.error || 'Failed to fetch organisations.');
+        setShowSetup(false);
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to retrieve cloud data.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to retrieve cloud data.';
+      setError(message);
       orgsFetchedRef.current = false; // Reset lock on error to allow retry
     } finally {
       setLoading(false);
@@ -278,21 +257,9 @@ export default function App() {
     if (!orgsLastKey || fetchingMoreOrgs) return;
     setFetchingMoreOrgs(true);
     try {
-      const activeToken = await getValidToken();
-      const res = await fetch(`${cognitoConfig.OrgsApiUrl}orgs?lastKey=${orgsLastKey}`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${activeToken}`,
-        },
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setOrgs(prev => [...prev, ...(data.orgs || [])]);
-        setOrgsLastKey(data.lastKey || null);
-      } else {
-        console.error('Failed to fetch more organisations:', data.error);
-      }
+      const data = await orgApi.list(orgsLastKey);
+      setOrgs(prev => [...prev, ...(data.orgs || [])]);
+      setOrgsLastKey(data.lastKey || null);
     } catch (err) {
       console.error('Error fetching more organisations:', err);
     } finally {
@@ -392,14 +359,9 @@ export default function App() {
                     setShowSetup(false);
 
                     // Asynchronously notify backend to persist genesis completed state
-                    getValidToken().then(async (activeToken) => {
+                    getValidToken().then(async () => {
                       try {
-                        await fetch(`${cognitoConfig.OrgsApiUrl}bootstrap`, {
-                          method: 'POST',
-                          headers: {
-                            Authorization: `Bearer ${activeToken}`,
-                          },
-                        });
+                        await orgApi.bootstrapComplete();
                       } catch (err) {
                         console.error('[Bootstrap] Failed to notify backend of completion:', err);
                       }

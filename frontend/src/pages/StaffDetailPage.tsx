@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getValidToken } from '../App';
 import { cognitoConfig } from '../cognitoConfig';
-import type { Organisation, StaffDetails, ExecutionRecord } from '../types';
+import type { Organisation, StaffDetails } from '../types';
 import { getInitials } from '../utils/name';
 
 export const StaffDetailPage: React.FC = () => {
