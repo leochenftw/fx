@@ -34,25 +34,25 @@ button {
   align-items: flex-start;
   gap: 1.5rem; /* gap-6 */
 
+  &__right {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem; /* space-x-6 */
+    width: 100%;
+    justify-content: space-between;
+    border-top: 1px solid rgb(241, 245, 249); /* border-t border-slate-100 */
+    padding-top: 1rem; /* pt-4 */
+
+    @media (min-width: 960px) {
+      width: auto;
+      justify-content: flex-end;
+      border-top: 0;
+      padding-top: 0;
+    }
+  }
+
   @media (min-width: 960px) {
     flex-direction: row;
     align-items: center;
-  }
-}
-
-.org-card__right {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem; /* space-x-6 */
-  width: 100%;
-  justify-content: space-between;
-  border-top: 1px solid rgb(241, 245, 249); /* border-t border-slate-100 */
-  padding-top: 1rem; /* pt-4 */
-
-  @media (min-width: 960px) {
-    width: auto;
-    justify-content: flex-end;
-    border-top: 0;
-    padding-top: 0;
   }
 }
