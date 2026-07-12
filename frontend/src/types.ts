@@ -12,7 +12,7 @@ export type {
 export type {
   OrgListProps,
   SidebarProps,
-  SetupOrgFormProps,
+  OrgFormProps,
   HeaderProps,
   LoginFormProps,
   NewPasswordFormProps,

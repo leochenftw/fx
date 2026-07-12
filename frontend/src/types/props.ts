@@ -9,7 +9,7 @@ export type {
 
 export type {
   OrgListProps,
-  SetupOrgFormProps,
+  OrgFormProps,
   HomePageProps,
   OrgEditPageProps,
   OrgListPageProps,

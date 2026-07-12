@@ -9,7 +9,7 @@ export interface OrgListProps {
   loadingMore?: boolean;
 }
 
-export interface SetupOrgFormProps {
+export interface OrgFormProps {
   onSubmit: (e: FormEvent) => void;
   orgName: string;
   setOrgName: (val: string) => void;

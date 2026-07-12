@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { SetupOrgForm } from '../components/SetupOrgForm';
+import { OrgForm } from '../components/OrgForm';
 import { cognitoConfig } from '../cognitoConfig';
 import { getValidToken } from '../App';
 import type { BankAccount, OpeningBalanceItem, OrgEditPageProps, BankOpeningDetail } from '../types';
@@ -271,7 +271,7 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
 
   return (
     <div className="space-y-6 w-full max-w-[1024px]">
-      <SetupOrgForm
+      <OrgForm
         onSubmit={handleEditOrganisation}
         orgName={orgName}
         setOrgName={setOrgName}

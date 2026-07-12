@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SetupOrgForm } from '../components/SetupOrgForm';
+import { OrgForm } from '../components/OrgForm';
 import { cognitoConfig } from '../cognitoConfig';
 import { getValidToken } from '../App';
 import type { BankAccount, OpeningBalanceItem, SetupPageProps, BankOpeningDetail } from '../types';
@@ -182,7 +182,7 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
   };
 
   return (
-    <SetupOrgForm
+    <OrgForm
       onSubmit={handleSetupOrganisation}
       orgName={orgName}
       setOrgName={setOrgName}

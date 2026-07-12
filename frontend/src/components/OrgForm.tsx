@@ -1,9 +1,9 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import type { SetupOrgFormProps } from '../types';
+import type { OrgFormProps } from '../types';
 
-export const SetupOrgForm: React.FC<SetupOrgFormProps> = ({
+export const OrgForm: React.FC<OrgFormProps> = ({
   onSubmit,
   orgName,
   setOrgName,
@@ -393,4 +393,4 @@ export const SetupOrgForm: React.FC<SetupOrgFormProps> = ({
     </form>
   );
 };
-export default SetupOrgForm;
+export default OrgForm;
