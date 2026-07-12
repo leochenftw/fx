@@ -16,7 +16,7 @@ import { OrgDetailPage } from './pages/OrgDetailPage';
 import { OrgEditPage } from './pages/OrgEditPage';
 import { StaffListPage } from './pages/StaffListPage';
 import { StaffDetailPage } from './pages/StaffDetailPage';
-import { StaffFormPage } from './pages/StaffFormPage';
+import { StaffEditPage } from './pages/StaffEditPage';
 
 // Import Components
 import { Header } from './components/Header';
@@ -425,7 +425,7 @@ export default function App() {
             path="/staff/new"
             element={
               <AppLayout onLogout={handleLogout}>
-                <StaffFormPage />
+                <StaffEditPage />
               </AppLayout>
             }
           />
@@ -441,7 +441,7 @@ export default function App() {
             path="/staff/:staffId/edit"
             element={
               <AppLayout onLogout={handleLogout}>
-                <StaffFormPage />
+                <StaffEditPage />
               </AppLayout>
             }
           />

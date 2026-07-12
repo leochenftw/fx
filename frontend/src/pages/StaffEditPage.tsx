@@ -4,7 +4,7 @@ import { getValidToken } from '../App';
 import { cognitoConfig } from '../cognitoConfig';
 import StaffForm, { type StaffFormState } from '../components/StaffForm';
 
-export const StaffFormPage: React.FC = () => {
+export const StaffEditPage: React.FC = () => {
   const { staffId } = useParams<{ staffId: string }>();
   const navigate = useNavigate();
   const isEditMode = !!staffId;
@@ -231,4 +231,4 @@ export const StaffFormPage: React.FC = () => {
     />
   );
 };
-export default StaffFormPage;
+export default StaffEditPage;
