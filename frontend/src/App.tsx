@@ -35,9 +35,15 @@ export const userPool = new CognitoUserPool({
   ClientId: cognitoConfig.ClientId,
 });
 
+let pendingTokenPromise: Promise<string> | null = null;
+
 // Helper: Safely get standard JWT token from Cognito session
 export const getValidToken = (): Promise<string> => {
-  return new Promise((resolve, reject) => {
+  if (pendingTokenPromise) {
+    return pendingTokenPromise;
+  }
+
+  const promise = new Promise<string>((resolve, reject) => {
     const cognitoUser = userPool.getCurrentUser();
     if (!cognitoUser) {
       reject(new Error('No active user session.'));
@@ -66,6 +72,12 @@ export const getValidToken = (): Promise<string> => {
       }
     });
   });
+
+  pendingTokenPromise = promise.finally(() => {
+    pendingTokenPromise = null;
+  });
+
+  return pendingTokenPromise;
 };
 
 // ── App Sidebar Layout Component (方案 B UI Design) ──
@@ -102,51 +114,58 @@ export default function App() {
   const [fetchingMoreOrgs, setFetchingMoreOrgs] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const orgsFetchedRef = useRef(false);
+  const authInitRef = useRef(false);
 
   // ── Mount Check: Silent Session Renewal using RefreshToken ──
   useEffect(() => {
+    if (authInitRef.current) return;
+    authInitRef.current = true;
+
     const cognitoUser = userPool.getCurrentUser();
-    if (cognitoUser) {
-      setLoading(true);
-      cognitoUser.getSession((err: any, session: any) => {
-        if (err || !session.isValid()) {
-          console.log('[Auth] Session invalid or expired. Cleaning up.');
-          handleLogout();
-          setLoading(false);
-          return;
-        }
-
-        const idToken = session.getIdToken().getJwtToken();
-        localStorage.setItem('idToken', idToken);
-
-        const payload = session.getIdToken().decodePayload();
-        if (payload.sub) {
-          localStorage.setItem('user_sub', payload.sub);
-        }
-        if (payload.email) {
-          localStorage.setItem('user_email', payload.email);
-        }
-        if (payload.given_name) {
-          localStorage.setItem('user_firstname', payload.given_name);
-        }
-        if (payload.family_name) {
-          localStorage.setItem('user_lastname', payload.family_name);
-        }
-        if (payload.locale) {
-          localStorage.setItem('i18n_lang', payload.locale);
-          i18n.changeLanguage(payload.locale);
-        }
-        const groups = payload['cognito:groups'];
-        if (Array.isArray(groups)) {
-          localStorage.setItem('user_groups', JSON.stringify(groups));
-        } else {
-          localStorage.setItem('user_groups', '[]');
-        }
-
-        setIsLoggedIn(true);
-        setLoading(false);
-      });
+    if (!cognitoUser) {
+      setIsLoggedIn(false);
+      return;
     }
+
+    setLoading(true);
+    cognitoUser.getSession((err: any, session: any) => {
+      if (err || !session.isValid()) {
+        console.log('[Auth] Session invalid or expired. Cleaning up.');
+        handleLogout();
+        setLoading(false);
+        return;
+      }
+
+      const idToken = session.getIdToken().getJwtToken();
+      localStorage.setItem('idToken', idToken);
+
+      const payload = session.getIdToken().decodePayload();
+      if (payload.sub) {
+        localStorage.setItem('user_sub', payload.sub);
+      }
+      if (payload.email) {
+        localStorage.setItem('user_email', payload.email);
+      }
+      if (payload.given_name) {
+        localStorage.setItem('user_firstname', payload.given_name);
+      }
+      if (payload.family_name) {
+        localStorage.setItem('user_lastname', payload.family_name);
+      }
+      if (payload.locale) {
+        localStorage.setItem('i18n_lang', payload.locale);
+        i18n.changeLanguage(payload.locale);
+      }
+      const groups = payload['cognito:groups'];
+      if (Array.isArray(groups)) {
+        localStorage.setItem('user_groups', JSON.stringify(groups));
+      } else {
+        localStorage.setItem('user_groups', '[]');
+      }
+
+      setIsLoggedIn(true);
+      setLoading(false);
+    });
   }, [i18n]);
 
   const bootstrapApp = async () => {
@@ -178,33 +197,8 @@ export default function App() {
   useEffect(() => {
     if (isLoggedIn && !loading) {
       bootstrapApp();
-
-      const cognitoUser = userPool.getCurrentUser();
-      if (cognitoUser) {
-        cognitoUser.getSession((err: any, session: any) => {
-          if (!err && session.isValid()) {
-            const payload = session.getIdToken().decodePayload();
-            if (payload.sub) {
-              localStorage.setItem('user_sub', payload.sub);
-            }
-            if (payload.email) {
-              localStorage.setItem('user_email', payload.email);
-            }
-            if (payload.given_name) {
-              localStorage.setItem('user_firstname', payload.given_name);
-            }
-            if (payload.family_name) {
-              localStorage.setItem('user_lastname', payload.family_name);
-            }
-            if (payload.locale) {
-              localStorage.setItem('i18n_lang', payload.locale);
-              i18n.changeLanguage(payload.locale);
-            }
-          }
-        });
-      }
     }
-  }, [isLoggedIn]);
+  }, [isLoggedIn, loading]);
 
   // ── ROUTE SENTINEL & SECURITY GUARDS ──
   useEffect(() => {
