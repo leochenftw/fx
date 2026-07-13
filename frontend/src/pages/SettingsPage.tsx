@@ -104,12 +104,34 @@ export const SettingsPage: React.FC = () => {
 
   // ── GST helpers ───────────────────────────────────────────────────────────
   const handleAddGstPeriod = () => {
-    if (!newGstFrom) { alert('Effective From date is required.'); return; }
+    if (!newGstFrom) { setError('Effective From date is required.'); return; }
     const rateVal = parseFloat(newGstRate) / 100;
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 1) {
-      alert('Please enter a valid rate between 0 and 100.');
+      setError('Please enter a valid GST rate between 0 and 100.');
       return;
     }
+    if (newGstTo && newGstFrom.localeCompare(newGstTo) > 0) {
+      setError('Effective From cannot be after Effective To.');
+      return;
+    }
+
+    // Overlap check — same logic as backend (s1 <= e2 && s2 <= e1)
+    const newS = newGstFrom;
+    const newE = newGstTo || '9999-12-31';
+    for (const existing of gstHistory) {
+      const exS = existing.effective_from;
+      const exE = existing.effective_to || '9999-12-31';
+      if (newS <= exE && exS <= newE) {
+        setError(
+          `This period [${newGstFrom} → ${newGstTo || 'open-ended'}] overlaps with existing period ` +
+          `[${existing.effective_from} → ${existing.effective_to || 'open-ended'}]. ` +
+          `Please close the existing open-ended period first.`
+        );
+        return;
+      }
+    }
+
+    setError(null);
     const updated = [
       ...gstHistory,
       { rate: rateVal, effective_from: newGstFrom, effective_to: newGstTo || null },
