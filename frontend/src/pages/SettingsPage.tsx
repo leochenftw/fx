@@ -14,6 +14,7 @@ interface GstPeriod {
 
 export const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
+  const s = (key: string, fallback?: string) => t(`settings_page.${key}`, fallback ?? key);
 
   // ── Compliance & Tax ──────────────────────────────────────────────────────
   const [gstHistory, setGstHistory] = useState<GstPeriod[]>([]);
@@ -56,11 +57,9 @@ export const SettingsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // Global GST config (no org needed)
         const gstConfig = await orgApi.getGstConfig();
         setGstHistory(gstConfig?.rate_history || []);
 
-        // Active org categories & rules (using localStorage active_org_id silently)
         const activeOrgId = localStorage.getItem('active_org_id');
         if (activeOrgId) {
           const detail = await orgApi.get(activeOrgId);
@@ -83,16 +82,14 @@ export const SettingsPage: React.FC = () => {
     bootstrap();
   }, []);
 
-  // ── Scroll-spy: update active nav based on scroll position ───────────────
+  // ── Scroll-spy ────────────────────────────────────────────────────────────
   useEffect(() => {
     const container = document.getElementById('settings-scroll-area');
     if (!container) return;
-
     const onScroll = () => {
       const automationTop = automationRef.current?.getBoundingClientRect().top ?? Infinity;
       setActiveNav(automationTop < 200 ? 'automation' : 'compliance');
     };
-
     container.addEventListener('scroll', onScroll);
     return () => container.removeEventListener('scroll', onScroll);
   }, []);
@@ -148,7 +145,7 @@ export const SettingsPage: React.FC = () => {
   const handleAddCategory = () => {
     const clean = newCategory.trim();
     if (!clean) return;
-    if (categories.includes(clean)) { alert('Category already exists.'); return; }
+    if (categories.includes(clean)) { setError('Category already exists.'); return; }
     setCategories([...categories, clean]);
     setNewCategory('');
   };
@@ -162,9 +159,9 @@ export const SettingsPage: React.FC = () => {
   const handleAddRule = () => {
     const clean = newRulePattern.trim();
     const cat = newRuleCategory || categories[0];
-    if (!clean || !cat) { alert('Both pattern and category are required.'); return; }
+    if (!clean || !cat) { setError('Both pattern and category are required.'); return; }
     if (staticRules.some(r => r.pattern.toLowerCase() === clean.toLowerCase())) {
-      alert('A rule with this pattern already exists.');
+      setError('A rule with this pattern already exists.');
       return;
     }
     setStaticRules([...staticRules, { pattern: clean, category: cat }]);
@@ -220,7 +217,7 @@ export const SettingsPage: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-[400px] text-slate-400 font-semibold space-y-4">
         <span className="material-icons animate-spin text-3xl text-slate-300">sync</span>
-        <span>Loading configurations...</span>
+        <span>{t('common.loading', 'Loading...')}</span>
       </div>
     );
   }
@@ -232,10 +229,10 @@ export const SettingsPage: React.FC = () => {
       {/* ── Page header ── */}
       <div className="border-b border-slate-100 pb-5">
         <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-          {t('settings.title', 'System Settings')}
+          {s('title', 'System Settings')}
         </h1>
         <p className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider font-mono">
-          {t('settings.subtitle', 'Configure system compliance tax rates and classification rules')}
+          {s('subtitle', 'Configure system compliance tax rates and classification rules')}
         </p>
       </div>
 
@@ -268,7 +265,7 @@ export const SettingsPage: React.FC = () => {
               }`}
             >
               <span className="material-icons text-base">balance</span>
-              <span>Compliance &amp; Tax</span>
+              <span>{s('nav_compliance', 'Compliance & Tax')}</span>
             </button>
             <button
               onClick={() => scrollTo(automationRef, 'automation')}
@@ -279,7 +276,7 @@ export const SettingsPage: React.FC = () => {
               }`}
             >
               <span className="material-icons text-base">tune</span>
-              <span>Workflow &amp; Automation</span>
+              <span>{s('nav_automation', 'Workflow & Automation')}</span>
             </button>
           </nav>
         </div>
@@ -287,20 +284,19 @@ export const SettingsPage: React.FC = () => {
         {/* ── Right scrollable content ── */}
         <div id="settings-scroll-area" className="flex-1 space-y-6">
 
-          {/* ══ Section 1: Financial & Tax Compliance ══ */}
+          {/* ══ Section: Financial & Tax Compliance ══ */}
           <div ref={complianceRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-5">
 
             <h2 className="text-base font-black text-slate-900 tracking-tight border-b border-slate-100 pb-3">
-              一、核心财务合规设置 (Financial &amp; Tax Compliance)
+              {s('compliance_title', 'Financial & Tax Compliance')}
             </h2>
 
-            {/* GST Rate label */}
             <div>
               <div className="text-sm font-extrabold text-slate-700 mb-1">
-                GST税率设定 (%)
+                {s('gst_label', 'GST Rate (%)')}
               </div>
               <p className="text-xs font-semibold text-slate-400 mb-3">
-                GST rates apply system-wide based on transaction dates. Configure New Zealand GST rate periods:
+                {s('gst_desc', 'GST rates apply system-wide based on transaction dates. Configure New Zealand GST rate periods:')}
               </p>
 
               {/* GST table */}
@@ -308,10 +304,10 @@ export const SettingsPage: React.FC = () => {
                 <table className="w-full text-left text-xs font-semibold text-slate-700">
                   <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 border-b border-slate-200">
                     <tr>
-                      <th className="px-4 py-3">GST Rate</th>
-                      <th className="px-4 py-3">Effective From</th>
-                      <th className="px-4 py-3">Effective To</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
+                      <th className="px-4 py-3">{s('gst_col_rate', 'GST Rate')}</th>
+                      <th className="px-4 py-3">{s('gst_col_from', 'Effective From')}</th>
+                      <th className="px-4 py-3">{s('gst_col_to', 'Effective To')}</th>
+                      <th className="px-4 py-3 text-right">{s('gst_col_actions', 'Actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -320,7 +316,7 @@ export const SettingsPage: React.FC = () => {
                         <td className="px-4 py-3 font-black text-slate-900">{(p.rate * 100).toFixed(1)}%</td>
                         <td className="px-4 py-3 font-mono text-slate-600">{p.effective_from}</td>
                         <td className="px-4 py-3 font-mono text-slate-500">
-                          {p.effective_to ?? <span className="text-slate-400">Open-ended (Current)</span>}
+                          {p.effective_to ?? s('gst_open_ended', 'Open-ended (Current)')}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -328,7 +324,7 @@ export const SettingsPage: React.FC = () => {
                             onClick={() => handleRemoveGstPeriod(idx)}
                             className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer text-xs hover:underline"
                           >
-                            Remove
+                            {s('gst_remove', 'Remove')}
                           </button>
                         </td>
                       </tr>
@@ -336,7 +332,7 @@ export const SettingsPage: React.FC = () => {
                     {gstHistory.length === 0 && (
                       <tr>
                         <td colSpan={4} className="px-4 py-5 text-center text-slate-400 font-semibold text-xs">
-                          No GST history configured. Defaults to 15%.
+                          {s('gst_empty', 'No GST history configured. Defaults to 15%.')}
                         </td>
                       </tr>
                     )}
@@ -347,11 +343,13 @@ export const SettingsPage: React.FC = () => {
               {/* Add GST Period form */}
               <div className="mt-4 bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-3">
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono">
-                  + Add New GST Rate Period
+                  {s('gst_add_title', '+ Add New GST Rate Period')}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                   <div className="sm:col-span-3">
-                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">Rate (%)</label>
+                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
+                      {s('gst_rate_label', 'Rate (%)')}
+                    </label>
                     <input
                       type="number"
                       step="0.1"
@@ -362,7 +360,9 @@ export const SettingsPage: React.FC = () => {
                     />
                   </div>
                   <div className="sm:col-span-4">
-                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">Effective From</label>
+                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
+                      {s('gst_from_label', 'Effective From')}
+                    </label>
                     <input
                       type="date"
                       value={newGstFrom}
@@ -371,7 +371,9 @@ export const SettingsPage: React.FC = () => {
                     />
                   </div>
                   <div className="sm:col-span-3">
-                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">Effective To (Optional)</label>
+                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
+                      {s('gst_to_label', 'Effective To (Optional)')}
+                    </label>
                     <input
                       type="date"
                       value={newGstTo}
@@ -385,7 +387,7 @@ export const SettingsPage: React.FC = () => {
                       onClick={handleAddGstPeriod}
                       className="bg-slate-900 hover:bg-slate-700 text-white text-xs font-bold py-2 w-full rounded-lg transition cursor-pointer"
                     >
-                      Add Period
+                      {s('gst_add_btn', 'Add Period')}
                     </button>
                   </div>
                 </div>
@@ -393,25 +395,23 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* ══ Section 3: Workflow & Automation ══ */}
+          {/* ══ Section: Workflow & Automation ══ */}
           <div ref={automationRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-5">
 
             <h2 className="text-base font-black text-slate-900 tracking-tight border-b border-slate-100 pb-3">
-              三、业务与自动化分类规则设置 (Workflow &amp; Automation)
+              {s('automation_title', 'Workflow & Automation')}
             </h2>
 
             {/* Categories */}
             <div className="space-y-3">
               <div>
                 <div className="text-sm font-extrabold text-slate-700 mb-0.5">
-                  自定义财务标签库管理 (Tags / Expense Categories)
+                  {s('tags_label', 'Tags / Expense Categories')}
                 </div>
                 <p className="text-xs font-semibold text-slate-400">
-                  Define tags used for manual matching or context parameters for transaction classifications:
+                  {s('tags_desc', 'Define tags used for manual matching or context parameters for transaction classifications:')}
                 </p>
               </div>
-
-              {/* Tag pills */}
               <div className="flex flex-wrap gap-2 p-3 border border-slate-100 rounded-xl bg-slate-50/40 min-h-[48px]">
                 {categories.map((cat) => (
                   <span
@@ -429,15 +429,15 @@ export const SettingsPage: React.FC = () => {
                   </span>
                 ))}
                 {categories.length === 0 && (
-                  <span className="text-slate-400 text-xs font-semibold py-1">No tags yet.</span>
+                  <span className="text-slate-400 text-xs font-semibold py-1">
+                    {s('tags_empty', 'No tags yet.')}
+                  </span>
                 )}
               </div>
-
-              {/* Add category */}
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder="New tag name (e.g. Subsidy)"
+                  placeholder={s('tags_add_placeholder', 'New tag name (e.g. Subsidy)')}
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
@@ -448,7 +448,7 @@ export const SettingsPage: React.FC = () => {
                   onClick={handleAddCategory}
                   className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                 >
-                  + Add Tag
+                  {s('tags_add_btn', '+ Add Tag')}
                 </button>
               </div>
             </div>
@@ -457,21 +457,19 @@ export const SettingsPage: React.FC = () => {
             <div className="space-y-3 pt-4 border-t border-slate-100">
               <div>
                 <div className="text-sm font-extrabold text-slate-700 mb-0.5">
-                  本地字符串硬规则拦截器 (Static Bank Rules)
+                  {s('rules_label', 'Static Bank Rules')}
                 </div>
                 <p className="text-xs font-semibold text-slate-400">
-                  Automatically classify imported transactions matching pattern strings to a specific category:
+                  {s('rules_desc', 'Automatically classify imported transactions matching pattern strings to a specific category:')}
                 </p>
               </div>
-
-              {/* Rules table */}
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="w-full text-left text-xs font-semibold text-slate-700">
                   <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 border-b border-slate-200">
                     <tr>
-                      <th className="px-4 py-3">若流水描述包含</th>
-                      <th className="px-4 py-3">则自动归类为</th>
-                      <th className="px-4 py-3 text-right">操作</th>
+                      <th className="px-4 py-3">{s('rules_col_pattern', 'If Description Contains')}</th>
+                      <th className="px-4 py-3">{s('rules_col_category', 'Map to Category')}</th>
+                      <th className="px-4 py-3 text-right">{s('rules_col_actions', 'Actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -489,7 +487,7 @@ export const SettingsPage: React.FC = () => {
                             onClick={() => handleRemoveRule(idx)}
                             className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer text-xs hover:underline"
                           >
-                            删除
+                            {s('rules_delete', 'Delete')}
                           </button>
                         </td>
                       </tr>
@@ -497,27 +495,25 @@ export const SettingsPage: React.FC = () => {
                     {staticRules.length === 0 && (
                       <tr>
                         <td colSpan={3} className="px-4 py-5 text-center text-slate-400 font-semibold text-xs">
-                          No auto-matching rules configured.
+                          {s('rules_empty', 'No auto-matching rules configured.')}
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-
-              {/* Add rule form */}
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-3">
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono">
-                  + Add Routing Rule
+                  {s('rules_add_title', '+ Add Routing Rule')}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                   <div className="sm:col-span-5">
                     <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
-                      Pattern (case-insensitive contains)
+                      {s('rules_pattern_label', 'Pattern (case-insensitive contains)')}
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Woolworths"
+                      placeholder={s('rules_pattern_placeholder', 'e.g. Woolworths')}
                       value={newRulePattern}
                       onChange={(e) => setNewRulePattern(e.target.value)}
                       className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
@@ -525,14 +521,14 @@ export const SettingsPage: React.FC = () => {
                   </div>
                   <div className="sm:col-span-5">
                     <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
-                      Assign Category
+                      {s('rules_category_label', 'Assign Category')}
                     </label>
                     <select
                       value={newRuleCategory}
                       onChange={(e) => setNewRuleCategory(e.target.value)}
                       className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer"
                     >
-                      <option value="">-- Choose Category --</option>
+                      <option value="">{s('rules_category_placeholder', '-- Choose Category --')}</option>
                       {categories.map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
@@ -544,7 +540,7 @@ export const SettingsPage: React.FC = () => {
                       onClick={handleAddRule}
                       className="bg-slate-900 hover:bg-slate-700 text-white text-xs font-bold py-2 w-full rounded-lg transition cursor-pointer"
                     >
-                      Add Rule
+                      {s('rules_add_btn', 'Add Rule')}
                     </button>
                   </div>
                 </div>
@@ -563,12 +559,12 @@ export const SettingsPage: React.FC = () => {
               {saving ? (
                 <>
                   <span className="material-icons animate-spin text-base">sync</span>
-                  <span>Saving...</span>
+                  <span>{s('saving_btn', 'Saving...')}</span>
                 </>
               ) : (
                 <>
                   <span className="material-icons text-base">save</span>
-                  <span>Save All Settings</span>
+                  <span>{s('save_btn', 'Save All Settings')}</span>
                 </>
               )}
             </button>
