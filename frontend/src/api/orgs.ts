@@ -21,11 +21,12 @@ export interface OrgDetailResponse {
   id: string;
   name: string;
   ird_number: string;
-  entity_type: string;
+  entity_type: 'sole_trader' | 'company' | 'ltc' | 'trust' | 'partnership';
   gst_registered: boolean;
-  gst_basis?: string;
-  gst_period?: string;
+  gst_basis?: 'payments' | 'invoice';
+  gst_period?: '1_month' | '2_months' | '6_months';
   role?: string;
+  created_at: string;
   bank_accounts?: Array<{
     account_name: string;
     account_number: string;
@@ -36,6 +37,12 @@ export interface OrgDetailResponse {
     ar_balances?: Record<string, number>;
     ap_balances?: Record<string, number>;
   };
+  nzbn?: string;
+  address?: string;
+  payroll_cycle?: 'weekly' | 'fortnightly' | 'monthly';
+  categories?: string[];
+  static_rules?: Array<{ pattern: string; category: string }>;
+  tax_year_end_month?: number;
 }
 
 export const orgApi = {
@@ -45,4 +52,9 @@ export const orgApi = {
   get: (orgId: string) => api.get<OrgDetailResponse>(`orgs/${orgId}`),
   create: (payload: unknown) => api.post<unknown>('orgs', payload),
   update: (orgId: string, payload: unknown) => api.put<unknown>(`orgs/${orgId}`, payload),
+  getGstConfig: () => api.get<any>('config/gst'),
+  saveGstConfig: (payload: any) => api.put<unknown>('config/gst', payload),
+  getMappings: () => api.get<any[]>('config/mappings'),
+  saveMapping: (bankName: string, cardType: string, payload: any) =>
+    api.put<unknown>(`config/mappings/${encodeURIComponent(bankName)}/${encodeURIComponent(cardType)}`, payload),
 };

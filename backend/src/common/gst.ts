@@ -102,3 +102,8 @@ function resolveRateFromHistory(dateStr: string, periods: GstRatePeriod[]): numb
 
   return 0.15; // default fallback
 }
+
+export function clearGstCache(): void {
+  cachedGstPeriods = null;
+}
+

@@ -36,9 +36,16 @@ export const OrgForm: React.FC<OrgFormProps> = ({
   loading,
   isEdit = false,
   orgId,
+  nzbn = '',
+  setNzbn,
+  address = '',
+  setAddress,
+  payrollCycle = 'weekly',
+  setPayrollCycle,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+
   return (
     <form onSubmit={onSubmit} className="space-y-6 w-full max-w-[1024px] pb-10">
       <div className="flex justify-between items-center mb-6">
@@ -155,12 +162,63 @@ export const OrgForm: React.FC<OrgFormProps> = ({
         </div>
       </div>
 
-      {/* Step 2: Accounts & Balances */}
+      {isEdit && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md">
+              Step 02
+            </span>
+            <h2 className="text-base font-black text-slate-900 mt-2 tracking-tight">Organisation Profile & Access</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Update NZBN, business address, and employee payroll cycle settings.</p>
+          </div>
+
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-bold text-slate-600 mb-1.5">NZ Business Number (NZBN)</label>
+                <input
+                  type="text"
+                  maxLength={13}
+                  placeholder="Enter 13-digit NZBN"
+                  value={nzbn}
+                  onChange={(e) => setNzbn && setNzbn(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-900 font-mono font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-600 mb-1.5">Payroll Cycle Settings</label>
+                <select
+                  value={payrollCycle}
+                  onChange={(e) => setPayrollCycle && setPayrollCycle(e.target.value as any)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition cursor-pointer"
+                >
+                  <option value="weekly">Weekly (每周)</option>
+                  <option value="fortnightly">Fortnightly (每两周)</option>
+                  <option value="monthly">Monthly (每月)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-600 mb-1.5">Legal Business Address</label>
+              <input
+                type="text"
+                placeholder="e.g. 5 Topsail Way, Wellington, NZ"
+                value={address}
+                onChange={(e) => setAddress && setAddress(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Accounts & Balances */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
         <div className="flex justify-between items-center border-b border-slate-100 pb-4">
           <div>
             <span className="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-md">
-              Step 02
+              {isEdit ? 'Step 03' : 'Step 02'}
             </span>
             <h2 className="text-base font-black text-slate-900 mt-2 tracking-tight">{t('setup.bank_balances_title')}</h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -363,6 +421,8 @@ export const OrgForm: React.FC<OrgFormProps> = ({
           </div>
         </div>
       </div>
+
+
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl p-3">

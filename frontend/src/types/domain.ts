@@ -24,6 +24,11 @@ export interface Organisation {
   tax_year_end_month: number;
   bank_accounts: BankAccount[];
   role?: string;
+  nzbn?: string;
+  address?: string;
+  payroll_cycle?: 'weekly' | 'fortnightly' | 'monthly';
+  categories?: string[];
+  static_rules?: { pattern: string; category: string }[];
   opening_balances?: {
     bank_balances?: Record<string, BankOpeningDetail>;
     ar_balances?: Record<string, number>;
@@ -46,6 +51,11 @@ export interface OrganisationDetail {
   gst_period?: '1_month' | '2_months' | '6_months';
   created_at: string;
   role?: string;
+  nzbn?: string;
+  address?: string;
+  payroll_cycle?: 'weekly' | 'fortnightly' | 'monthly';
+  categories?: string[];
+  static_rules?: { pattern: string; category: string }[];
   bank_accounts?: {
     account_name: string;
     account_number: string;
@@ -62,6 +72,7 @@ export interface OrganisationDetail {
     email: string;
     role: string;
   }[];
+  tax_year_end_month?: number;
 }
 
 export interface ExecutionRecord {

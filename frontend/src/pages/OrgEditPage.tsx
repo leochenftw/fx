@@ -26,6 +26,13 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
   const [arItems, setArItems] = useState<OpeningBalanceItem[]>([]);
   const [apItems, setApItems] = useState<OpeningBalanceItem[]>([]);
 
+  // Settings States
+  const [nzbn, setNzbn] = useState('');
+  const [address, setAddress] = useState('');
+  const [payrollCycle, setPayrollCycle] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [staticRules, setStaticRules] = useState<{ pattern: string; category: string }[]>([]);
+
   // 1. Fetch existing organisation configuration on mount
   useEffect(() => {
     const fetchExistingData = async () => {
@@ -51,6 +58,11 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
           setGstRegistered(!!data.gst_registered);
           setGstBasis(data.gst_basis || 'payments');
           setGstPeriod(data.gst_period || '2_months');
+          setNzbn(data.nzbn || '');
+          setAddress(data.address || '');
+          setPayrollCycle(data.payroll_cycle || 'weekly');
+          setCategories(data.categories || []);
+          setStaticRules(data.static_rules || []);
 
           // Map bank accounts
           if (data.bank_accounts && Array.isArray(data.bank_accounts)) {
@@ -227,6 +239,11 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
       gst_basis: gstRegistered ? gstBasis : undefined,
       gst_period: gstRegistered ? gstPeriod : undefined,
       bank_accounts: accountsInfo,
+      nzbn,
+      address,
+      payroll_cycle: payrollCycle,
+      categories,
+      static_rules: staticRules,
       opening_balances: {
         bank_balances,
         ar_balances,
@@ -301,6 +318,12 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
         loading={loading}
         isEdit={true}
         orgId={orgId}
+        nzbn={nzbn}
+        setNzbn={setNzbn}
+        address={address}
+        setAddress={setAddress}
+        payrollCycle={payrollCycle}
+        setPayrollCycle={setPayrollCycle}
       />
     </div>
   );

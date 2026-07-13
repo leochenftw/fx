@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'crypto';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
-import { getGstRateForDate } from '../common/gst';
+import { getGstRateForDate, clearGstCache } from '../common/gst';
 import {
   createTransaction,
   listTransactions,
@@ -51,6 +51,14 @@ interface OrgMetadata {
   tax_year_end_month: number;
   bank_accounts?: BankAccount[];
   created_by: string; // 顺手塞入创建者审计字段，但不做越权卡线
+  nzbn?: string;
+  address?: string;
+  payroll_cycle?: 'weekly' | 'fortnightly' | 'monthly';
+  categories?: string[];
+  static_rules?: {
+    pattern: string;
+    category: string;
+  }[];
 }
 
 interface BankOpeningDetail {
@@ -149,6 +157,144 @@ export async function handler(event: {
     : event.body || '{}';
 
   try {
+    // GET /config/gst — Get global GST rules
+    if (method === 'GET' && path === '/config/gst') {
+      const response = await ddb.send(
+        new GetCommand({
+          TableName: TABLE_NAME,
+          Key: {
+            pk: 'CONFIG#GLOBAL',
+            sk: 'TAX#NZ#GST',
+          },
+        })
+      );
+      if (response.Item) {
+        return json(200, response.Item);
+      }
+      return json(200, {
+        rate_history: [
+          { rate: 0.15, effective_from: '2010-10-01', effective_to: null }
+        ]
+      });
+    }
+
+    // PUT /config/gst — Update global GST rules
+    if (method === 'PUT' && path === '/config/gst') {
+      const payload = JSON.parse(rawBody);
+      if (!payload.rate_history || !Array.isArray(payload.rate_history)) {
+        return json(400, { error: 'rate_history array is required' });
+      }
+
+      const history = payload.rate_history.map((p: any) => ({
+        rate: Number(p.rate),
+        effective_from: String(p.effective_from).trim(),
+        effective_to: p.effective_to ? String(p.effective_to).trim() : null
+      }));
+
+      for (const p of history) {
+        if (!p.effective_from) {
+          return json(400, { error: 'effective_from is required for all periods' });
+        }
+        if (p.effective_to && p.effective_from.localeCompare(p.effective_to) > 0) {
+          return json(400, { error: `effective_from cannot be after effective_to for rate ${p.rate}` });
+        }
+        if (isNaN(p.rate) || p.rate < 0 || p.rate > 1) {
+          return json(400, { error: `invalid rate value: ${p.rate}. Must be decimal ratio between 0.0 and 1.0.` });
+        }
+      }
+
+      // Check overlap conflicts
+      for (let i = 0; i < history.length; i++) {
+        const p1 = history[i];
+        const s1 = p1.effective_from;
+        const e1 = p1.effective_to || '9999-12-31';
+
+        for (let j = i + 1; j < history.length; j++) {
+          const p2 = history[j];
+          const s2 = p2.effective_from;
+          const e2 = p2.effective_to || '9999-12-31';
+
+          if (s1 <= e2 && s2 <= e1) {
+            return json(400, {
+              error: `GST rate periods overlap: [${p1.effective_from} to ${p1.effective_to || 'open-ended'}] overlaps with [${p2.effective_from} to ${p2.effective_to || 'open-ended'}]`
+            });
+          }
+        }
+      }
+
+      await ddb.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: {
+            pk: 'CONFIG#GLOBAL',
+            sk: 'TAX#NZ#GST',
+            country: 'NZ',
+            tax_name: 'GST',
+            default_rate: history[0]?.rate || 0.15,
+            rate_history: history,
+            updated_at: new Date().toISOString()
+          },
+        })
+      );
+
+      // Invalidate the cache
+      clearGstCache();
+
+      return json(200, { message: 'GST config updated' });
+    }
+
+    // GET /config/mappings — Get all global CSV mappings
+    if (method === 'GET' && path === '/config/mappings') {
+      const response = await ddb.send(
+        new QueryCommand({
+          TableName: TABLE_NAME,
+          KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+          ExpressionAttributeValues: {
+            ':pk': 'CONFIG#GLOBAL',
+            ':prefix': 'MAPPING#',
+          },
+        })
+      );
+      return json(200, response.Items || []);
+    }
+
+    // PUT /config/mappings/:bankName/:cardType — Save/update a global mapping
+    const mappingMatch = path.match(/^\/config\/mappings\/([^/]+)\/([^/]+)$/);
+    if (method === 'PUT' && mappingMatch) {
+      const bankName = decodeURIComponent(mappingMatch[1]);
+      const cardType = decodeURIComponent(mappingMatch[2]);
+      const payload = JSON.parse(rawBody);
+
+      if (!payload.format_name || !payload.date_column || !payload.amount_column || !payload.vendor_column) {
+        return json(400, { error: 'format_name, date_column, amount_column, and vendor_column are required' });
+      }
+
+      const item = {
+        pk: 'CONFIG#GLOBAL',
+        sk: `MAPPING#${bankName}#${cardType}`,
+        bank_name: bankName,
+        card_type: cardType,
+        format_name: payload.format_name,
+        date_column: payload.date_column,
+        amount_column: payload.amount_column,
+        vendor_column: payload.vendor_column,
+        description_columns: payload.description_columns || [],
+        indicator_mode: payload.indicator_mode || 'auto',
+        indicator_column: payload.indicator_column,
+        debit_value: payload.debit_value,
+        credit_value: payload.credit_value,
+        updated_at: new Date().toISOString()
+      };
+
+      await ddb.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: item,
+        })
+      );
+      return json(200, item);
+    }
+
     // POST /orgs — Create a new organisation
     if (method === 'POST' && path === '/orgs') {
       const rawPayload = JSON.parse(rawBody);
@@ -1055,26 +1201,46 @@ export async function handler(event: {
       const payload: Partial<OrgMetadata> = rawPayload;
       const openings: OpeningBalancesInput = rawPayload.opening_balances || {};
 
-      if (!payload.name || !payload.entity_type || !payload.ird_number) {
+      const orgPk = `ORG#${orgId}`;
+
+      // Retrieve existing METADATA record to allow partial (patch-like) updates
+      const existingRes = await ddb.send(new GetCommand({
+        TableName: TABLE_NAME,
+        Key: {
+          pk: orgPk,
+          sk: 'METADATA'
+        }
+      }));
+
+      const existingItem = existingRes.Item || {};
+
+      const name = payload.name !== undefined ? payload.name : existingItem.name;
+      const entity_type = payload.entity_type !== undefined ? payload.entity_type : existingItem.entity_type;
+      const ird_number = payload.ird_number !== undefined ? payload.ird_number : existingItem.ird_number;
+
+      if (!name || !entity_type || !ird_number) {
         return json(400, { error: 'name, entity_type, and ird_number are required' });
       }
-
-      const orgPk = `ORG#${orgId}`;
 
       // 1. 更新 METADATA 记录
       const metadataItem = {
         pk: orgPk,
         sk: 'METADATA',
         id: orgId,
-        created_by: userId,
-        name: payload.name,
-        ird_number: payload.ird_number,
-        entity_type: payload.entity_type,
-        gst_registered: payload.gst_registered ?? false,
-        gst_basis: payload.gst_basis,
-        gst_period: payload.gst_period,
-        tax_year_end_month: payload.tax_year_end_month ?? 3,
-        bank_accounts: payload.bank_accounts ?? [],
+        created_by: existingItem.created_by || userId,
+        name,
+        ird_number,
+        entity_type,
+        gst_registered: payload.gst_registered !== undefined ? payload.gst_registered : (existingItem.gst_registered ?? false),
+        gst_basis: payload.gst_basis !== undefined ? payload.gst_basis : existingItem.gst_basis,
+        gst_period: payload.gst_period !== undefined ? payload.gst_period : existingItem.gst_period,
+        tax_year_end_month: payload.tax_year_end_month !== undefined ? payload.tax_year_end_month : (existingItem.tax_year_end_month ?? 3),
+        bank_accounts: payload.bank_accounts !== undefined ? payload.bank_accounts : (existingItem.bank_accounts ?? []),
+        nzbn: payload.nzbn !== undefined ? payload.nzbn : existingItem.nzbn,
+        address: payload.address !== undefined ? payload.address : existingItem.address,
+        payroll_cycle: payload.payroll_cycle !== undefined ? payload.payroll_cycle : existingItem.payroll_cycle,
+        categories: payload.categories !== undefined ? payload.categories : existingItem.categories,
+        static_rules: payload.static_rules !== undefined ? payload.static_rules : existingItem.static_rules,
         updated_at: new Date().toISOString(),
       };
 

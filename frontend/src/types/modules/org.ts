@@ -39,6 +39,12 @@ export interface OrgFormProps {
   loading: boolean;
   isEdit?: boolean;
   orgId?: string;
+  nzbn?: string;
+  setNzbn?: (val: string) => void;
+  address?: string;
+  setAddress?: (val: string) => void;
+  payrollCycle?: 'weekly' | 'fortnightly' | 'monthly';
+  setPayrollCycle?: (val: 'weekly' | 'fortnightly' | 'monthly') => void;
 }
 
 export interface HomePageProps {
