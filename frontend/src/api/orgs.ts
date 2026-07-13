@@ -57,4 +57,7 @@ export const orgApi = {
   getMappings: () => api.get<any[]>('config/mappings'),
   saveMapping: (bankName: string, cardType: string, payload: any) =>
     api.put<unknown>(`config/mappings/${encodeURIComponent(bankName)}/${encodeURIComponent(cardType)}`, payload),
+  getWorkflowConfig: () => api.get<{ categories: string[]; static_rules: Array<{ pattern: string; category: string }> }>('config/workflow'),
+  saveWorkflowConfig: (payload: { categories: string[]; static_rules: Array<{ pattern: string; category: string }> }) =>
+    api.put<unknown>('config/workflow', payload),
 };

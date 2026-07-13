@@ -295,6 +295,68 @@ export async function handler(event: {
       return json(200, item);
     }
 
+    // GET /config/workflow — Get global workflow config (categories + static_rules)
+    if (method === 'GET' && path === '/config/workflow') {
+      const response = await ddb.send(
+        new GetCommand({
+          TableName: TABLE_NAME,
+          Key: {
+            pk: 'CONFIG#GLOBAL',
+            sk: 'WORKFLOW#SETTINGS',
+          },
+        })
+      );
+      if (response.Item) {
+        return json(200, {
+          categories: response.Item.categories || [],
+          static_rules: response.Item.static_rules || [],
+        });
+      }
+      // Return sensible defaults if not yet configured
+      return json(200, {
+        categories: [
+          'Sales', 'Consulting Income', 'Rent', 'Utilities',
+          'Internet & Phone', 'Travel', 'Motor Vehicle Expenses',
+          'Software', 'Wages', 'General Expenses', 'Uncategorized',
+        ],
+        static_rules: [],
+      });
+    }
+
+    // PUT /config/workflow — Update global workflow config (categories + static_rules)
+    if (method === 'PUT' && path === '/config/workflow') {
+      const payload = JSON.parse(rawBody);
+
+      if (!Array.isArray(payload.categories)) {
+        return json(400, { error: 'categories must be an array of strings' });
+      }
+      if (!Array.isArray(payload.static_rules)) {
+        return json(400, { error: 'static_rules must be an array' });
+      }
+      for (const rule of payload.static_rules) {
+        if (!rule.pattern || !rule.category) {
+          return json(400, { error: 'Each static rule must have a pattern and a category' });
+        }
+      }
+
+      await ddb.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: {
+            pk: 'CONFIG#GLOBAL',
+            sk: 'WORKFLOW#SETTINGS',
+            categories: payload.categories.map((c: any) => String(c).trim()).filter(Boolean),
+            static_rules: payload.static_rules.map((r: any) => ({
+              pattern: String(r.pattern).trim(),
+              category: String(r.category).trim(),
+            })),
+            updated_at: new Date().toISOString(),
+          },
+        })
+      );
+      return json(200, { message: 'Workflow config updated' });
+    }
+
     // POST /orgs — Create a new organisation
     if (method === 'POST' && path === '/orgs') {
       const rawPayload = JSON.parse(rawBody);

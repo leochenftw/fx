@@ -21,6 +21,7 @@ export const SettingsPage: React.FC = () => {
   const [newGstRate, setNewGstRate] = useState<string>('15');
   const [newGstFrom, setNewGstFrom] = useState<string>('');
   const [newGstTo, setNewGstTo] = useState<string>('');
+  const [editingGstIdx, setEditingGstIdx] = useState<number | null>(null);
 
   // ── Workflow & Automation ─────────────────────────────────────────────────
   const [categories, setCategories] = useState<string[]>([]);
@@ -42,13 +43,7 @@ export const SettingsPage: React.FC = () => {
 
   const initFetched = useRef<boolean>(false);
 
-  const defaultCategories = [
-    'Sales', 'Consulting Income', 'Rent', 'Utilities',
-    'Internet & Phone', 'Travel', 'Motor Vehicle Expenses',
-    'Software', 'Wages', 'General Expenses', 'Uncategorized',
-  ];
-
-  // ── Bootstrap: load global GST + active org categories ───────────────────
+  // ── Bootstrap: load global config (zero org requests) ────────────────────
   useEffect(() => {
     if (initFetched.current) return;
     initFetched.current = true;
@@ -57,20 +52,14 @@ export const SettingsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const gstConfig = await orgApi.getGstConfig();
+        // Both calls are global config — zero org requests
+        const [gstConfig, workflowConfig] = await Promise.all([
+          orgApi.getGstConfig(),
+          orgApi.getWorkflowConfig(),
+        ]);
         setGstHistory(gstConfig?.rate_history || []);
-
-        const activeOrgId = localStorage.getItem('active_org_id');
-        if (activeOrgId) {
-          const detail = await orgApi.get(activeOrgId);
-          const d = detail as any;
-          setCategories(
-            d.categories && d.categories.length > 0 ? d.categories : defaultCategories
-          );
-          setStaticRules(d.static_rules || []);
-        } else {
-          setCategories(defaultCategories);
-        }
+        setCategories(workflowConfig.categories || []);
+        setStaticRules(workflowConfig.static_rules || []);
       } catch (err: any) {
         console.error('[Settings] Bootstrap error:', err);
         setError(err.message || 'Failed to load configuration');
@@ -113,9 +102,12 @@ export const SettingsPage: React.FC = () => {
     }
 
     // Overlap check — same logic as backend (s1 <= e2 && s2 <= e1)
+    // Skip the row currently being edited to avoid self-collision
     const newS = newGstFrom;
     const newE = newGstTo || '9999-12-31';
-    for (const existing of gstHistory) {
+    for (let i = 0; i < gstHistory.length; i++) {
+      if (i === editingGstIdx) continue; // skip self when editing
+      const existing = gstHistory[i];
       const exS = existing.effective_from;
       const exE = existing.effective_to || '9999-12-31';
       if (newS <= exE && exS <= newE) {
@@ -129,13 +121,42 @@ export const SettingsPage: React.FC = () => {
     }
 
     setError(null);
-    const updated = [
-      ...gstHistory,
-      { rate: rateVal, effective_from: newGstFrom, effective_to: newGstTo || null },
-    ].sort((a, b) => a.effective_from.localeCompare(b.effective_from));
-    setGstHistory(updated);
+    const period = { rate: rateVal, effective_from: newGstFrom, effective_to: newGstTo || null };
+
+    if (editingGstIdx !== null) {
+      // Replace the edited row in-place, then re-sort
+      const updated = gstHistory
+        .map((p, i) => (i === editingGstIdx ? period : p))
+        .sort((a, b) => a.effective_from.localeCompare(b.effective_from));
+      setGstHistory(updated);
+      setEditingGstIdx(null);
+    } else {
+      const updated = [
+        ...gstHistory,
+        period,
+      ].sort((a, b) => a.effective_from.localeCompare(b.effective_from));
+      setGstHistory(updated);
+    }
     setNewGstFrom('');
     setNewGstTo('');
+    setNewGstRate('15');
+  };
+
+  const handleEditGstPeriod = (idx: number) => {
+    const p = gstHistory[idx];
+    setNewGstRate(String((p.rate * 100).toFixed(1)));
+    setNewGstFrom(p.effective_from);
+    setNewGstTo(p.effective_to || '');
+    setEditingGstIdx(idx);
+    setError(null);
+  };
+
+  const handleCancelEditGst = () => {
+    setEditingGstIdx(null);
+    setNewGstRate('15');
+    setNewGstFrom('');
+    setNewGstTo('');
+    setError(null);
   };
 
   const handleRemoveGstPeriod = (idx: number) =>
@@ -177,31 +198,11 @@ export const SettingsPage: React.FC = () => {
     setError(null);
     setSuccessMsg(null);
     try {
-      const activeOrgId = localStorage.getItem('active_org_id');
-      const promises: Promise<any>[] = [
+      // Both saves are global config — zero org requests
+      await Promise.all([
         orgApi.saveGstConfig({ rate_history: gstHistory }),
-      ];
-
-      if (activeOrgId) {
-        const detail = await orgApi.get(activeOrgId);
-        const d = detail as any;
-        promises.push(
-          orgApi.update(activeOrgId, {
-            name: d.name,
-            ird_number: d.ird_number,
-            entity_type: d.entity_type,
-            gst_registered: d.gst_registered,
-            gst_basis: d.gst_basis,
-            gst_period: d.gst_period,
-            bank_accounts: d.bank_accounts || [],
-            opening_balances: d.opening_balances || {},
-            categories,
-            static_rules: staticRules,
-          })
-        );
-      }
-
-      await Promise.all(promises);
+        orgApi.saveWorkflowConfig({ categories, static_rules: staticRules }),
+      ]);
       setSuccessMsg('System configurations saved successfully.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
@@ -254,26 +255,24 @@ export const SettingsPage: React.FC = () => {
       <div className="flex gap-6 items-start">
 
         {/* ── Left anchor sub-nav ── */}
-        <div className="w-48 flex-shrink-0 sticky top-6">
+        <div className="w-48 flex-shrink-0 sticky top-23">
           <nav className="bg-white border border-slate-200 rounded-2xl shadow-sm p-2 space-y-1">
             <button
               onClick={() => scrollTo(complianceRef, 'compliance')}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-left transition cursor-pointer ${
-                activeNav === 'compliance'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-left transition cursor-pointer ${activeNav === 'compliance'
+                ? 'bg-slate-900 text-white'
+                : 'text-slate-600 hover:bg-slate-50'
+                }`}
             >
               <span className="material-icons text-base">balance</span>
               <span>{s('nav_compliance', 'Compliance & Tax')}</span>
             </button>
             <button
               onClick={() => scrollTo(automationRef, 'automation')}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-left transition cursor-pointer ${
-                activeNav === 'automation'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-left transition cursor-pointer ${activeNav === 'automation'
+                ? 'bg-slate-900 text-white'
+                : 'text-slate-600 hover:bg-slate-50'
+                }`}
             >
               <span className="material-icons text-base">tune</span>
               <span>{s('nav_automation', 'Workflow & Automation')}</span>
@@ -318,7 +317,14 @@ export const SettingsPage: React.FC = () => {
                         <td className="px-4 py-3 font-mono text-slate-500">
                           {p.effective_to ?? s('gst_open_ended', 'Open-ended (Current)')}
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-right space-x-3">
+                          <button
+                            type="button"
+                            onClick={() => handleEditGstPeriod(idx)}
+                            className="text-slate-500 hover:text-slate-800 font-bold cursor-pointer text-xs hover:underline"
+                          >
+                            Edit
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleRemoveGstPeriod(idx)}
@@ -340,10 +346,12 @@ export const SettingsPage: React.FC = () => {
                 </table>
               </div>
 
-              {/* Add GST Period form */}
-              <div className="mt-4 bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-3">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono">
-                  {s('gst_add_title', '+ Add New GST Rate Period')}
+              {/* Add / Edit GST Period form */}
+              <div className={`mt-4 border rounded-xl p-4 space-y-3 ${editingGstIdx !== null ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+                <div className="text-[10px] font-black uppercase tracking-wider font-mono text-slate-500">
+                  {editingGstIdx !== null
+                    ? `Editing Period #${editingGstIdx + 1}`
+                    : s('gst_add_title', '+ Add New GST Rate Period')}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                   <div className="sm:col-span-3">
@@ -381,14 +389,26 @@ export const SettingsPage: React.FC = () => {
                       className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-2 flex flex-col gap-1.5">
                     <button
                       type="button"
                       onClick={handleAddGstPeriod}
-                      className="bg-slate-900 hover:bg-slate-700 text-white text-xs font-bold py-2 w-full rounded-lg transition cursor-pointer"
+                      className={`text-white text-xs font-bold py-2 w-full rounded-lg transition cursor-pointer ${editingGstIdx !== null
+                        ? 'bg-amber-600 hover:bg-amber-500'
+                        : 'bg-slate-900 hover:bg-slate-700'
+                        }`}
                     >
-                      {s('gst_add_btn', 'Add Period')}
+                      {editingGstIdx !== null ? 'Update' : s('gst_add_btn', 'Add Period')}
                     </button>
+                    {editingGstIdx !== null && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditGst}
+                        className="bg-white border border-slate-200 text-slate-600 hover:border-slate-400 text-xs font-bold py-2 w-full rounded-lg transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
