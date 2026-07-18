@@ -26,9 +26,21 @@ export const SettingsPage: React.FC = () => {
   // ── Workflow & Automation ─────────────────────────────────────────────────
   const [categories, setCategories] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState<string>('');
-  const [staticRules, setStaticRules] = useState<{ pattern: string; category: string }[]>([]);
-  const [newRulePattern, setNewRulePattern] = useState<string>('');
-  const [newRuleCategory, setNewRuleCategory] = useState<string>('');
+
+  // ── Merchant Mapping Directory (FxForeignEntitiesTable) ───────────────────
+  const [activeEntityTab, setActiveEntityTab] = useState<'Supplier' | 'Customer'>('Supplier');
+  const [suppliers, setSuppliers] = useState<Array<{ entity_id: string; entity_type: 'Supplier' | 'Customer'; entity_name: string; default_category: string; ird_number?: string; created_at?: string }>>([]);
+  const [customers, setCustomers] = useState<Array<{ entity_id: string; entity_type: 'Supplier' | 'Customer'; entity_name: string; default_category: string; ird_number?: string; created_at?: string }>>([]);
+  const [entitiesLoading, setEntitiesLoading] = useState<boolean>(false);
+  const [newEntityName, setNewEntityName] = useState<string>('');
+  const [newEntityIrd, setNewEntityIrd] = useState<string>('');
+  const [newEntityCategory, setNewEntityCategory] = useState<string>('');
+
+  // Inline editing state
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const [editName, setEditName] = useState<string>('');
+  const [editIrd, setEditIrd] = useState<string>('');
+  const [editCategory, setEditCategory] = useState<string>('');
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState<boolean>(true);
@@ -43,7 +55,7 @@ export const SettingsPage: React.FC = () => {
 
   const initFetched = useRef<boolean>(false);
 
-  // ── Bootstrap: load global config (zero org requests) ────────────────────
+  // ── Bootstrap: load configurations ───────────────────────────────────────
   useEffect(() => {
     if (initFetched.current) return;
     initFetched.current = true;
@@ -52,14 +64,25 @@ export const SettingsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // Both calls are global config — zero org requests
         const [gstConfig, workflowConfig] = await Promise.all([
           orgApi.getGstConfig(),
           orgApi.getWorkflowConfig(),
         ]);
         setGstHistory(gstConfig?.rate_history || []);
-        setCategories(workflowConfig.categories || []);
-        setStaticRules(workflowConfig.static_rules || []);
+        const cats = workflowConfig.categories || [];
+        setCategories(cats);
+        setNewEntityCategory(cats[0] || '');
+
+        setEntitiesLoading(true);
+        try {
+          const { entities: all } = await orgApi.getAllEntities();
+          setSuppliers(all.filter(e => e.entity_type === 'Supplier'));
+          setCustomers(all.filter(e => e.entity_type === 'Customer'));
+        } catch (entErr) {
+          console.error('Failed to load merchant mappings:', entErr);
+        } finally {
+          setEntitiesLoading(false);
+        }
       } catch (err: any) {
         console.error('[Settings] Bootstrap error:', err);
         setError(err.message || 'Failed to load configuration');
@@ -101,12 +124,10 @@ export const SettingsPage: React.FC = () => {
       return;
     }
 
-    // Overlap check — same logic as backend (s1 <= e2 && s2 <= e1)
-    // Skip the row currently being edited to avoid self-collision
     const newS = newGstFrom;
     const newE = newGstTo || '9999-12-31';
     for (let i = 0; i < gstHistory.length; i++) {
-      if (i === editingGstIdx) continue; // skip self when editing
+      if (i === editingGstIdx) continue;
       const existing = gstHistory[i];
       const exS = existing.effective_from;
       const exE = existing.effective_to || '9999-12-31';
@@ -124,7 +145,6 @@ export const SettingsPage: React.FC = () => {
     const period = { rate: rateVal, effective_from: newGstFrom, effective_to: newGstTo || null };
 
     if (editingGstIdx !== null) {
-      // Replace the edited row in-place, then re-sort
       const updated = gstHistory
         .map((p, i) => (i === editingGstIdx ? period : p))
         .sort((a, b) => a.effective_from.localeCompare(b.effective_from));
@@ -173,35 +193,107 @@ export const SettingsPage: React.FC = () => {
 
   const handleRemoveCategory = (cat: string) => {
     setCategories(categories.filter(c => c !== cat));
-    setStaticRules(staticRules.filter(r => r.category !== cat));
   };
 
-  // ── Static rule helpers ───────────────────────────────────────────────────
-  const handleAddRule = () => {
-    const clean = newRulePattern.trim();
-    const cat = newRuleCategory || categories[0];
-    if (!clean || !cat) { setError('Both pattern and category are required.'); return; }
-    if (staticRules.some(r => r.pattern.toLowerCase() === clean.toLowerCase())) {
-      setError('A rule with this pattern already exists.');
+  // ── Merchant mapping API helpers ──────────────────────────────────────────
+  const handleAddEntity = async () => {
+    setError(null);
+    setSuccessMsg(null);
+    const cleanName = newEntityName.trim();
+    const cleanIrd = newEntityIrd.trim();
+    const category = newEntityCategory || categories[0];
+    if (!cleanName || !category) {
+      setError('Merchant Name and Default Category are required.');
       return;
     }
-    setStaticRules([...staticRules, { pattern: clean, category: cat }]);
-    setNewRulePattern('');
+    try {
+      const created = await orgApi.createEntity(activeEntityTab, {
+        entity_name: cleanName,
+        default_category: category,
+        ird_number: cleanIrd
+      });
+      if (activeEntityTab === 'Supplier') {
+        setSuppliers([...suppliers, created]);
+      } else {
+        setCustomers([...customers, created]);
+      }
+      setNewEntityName('');
+      setNewEntityIrd('');
+      setSuccessMsg('Merchant mapping created successfully.');
+    } catch (err: any) {
+      console.error('Failed to create merchant mapping:', err);
+      setError(err.message || 'Failed to create merchant mapping');
+    }
   };
 
-  const handleRemoveRule = (idx: number) =>
-    setStaticRules(staticRules.filter((_, i) => i !== idx));
+  const handleStartEditEntity = (ent: any) => {
+    setEditingEntityId(ent.entity_id);
+    setEditName(ent.entity_name);
+    setEditIrd(ent.ird_number || '');
+    setEditCategory(ent.default_category);
+    setError(null);
+    setSuccessMsg(null);
+  };
 
-  // ── Save ──────────────────────────────────────────────────────────────────
+  const handleCancelEditEntity = () => {
+    setEditingEntityId(null);
+    setError(null);
+  };
+
+  const handleSaveEntityEdit = async (ent: any) => {
+    setError(null);
+    setSuccessMsg(null);
+    const cleanName = editName.trim();
+    if (!cleanName || !editCategory) {
+      setError('Merchant Name and Default Category are required.');
+      return;
+    }
+    try {
+      const updated = await orgApi.updateEntity(activeEntityTab, ent.entity_id, {
+        entity_name: cleanName,
+        default_category: editCategory,
+        ird_number: editIrd.trim(),
+        created_at: ent.created_at
+      });
+      if (activeEntityTab === 'Supplier') {
+        setSuppliers(suppliers.map(e => e.entity_id === ent.entity_id ? updated : e));
+      } else {
+        setCustomers(customers.map(e => e.entity_id === ent.entity_id ? updated : e));
+      }
+      setEditingEntityId(null);
+      setSuccessMsg('Merchant mapping updated successfully.');
+    } catch (err: any) {
+      console.error('Failed to update merchant mapping:', err);
+      setError(err.message || 'Failed to update merchant mapping');
+    }
+  };
+
+  const handleRemoveEntity = async (entityId: string) => {
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      await orgApi.deleteEntity(activeEntityTab, entityId);
+      if (activeEntityTab === 'Supplier') {
+        setSuppliers(suppliers.filter(e => e.entity_id !== entityId));
+      } else {
+        setCustomers(customers.filter(e => e.entity_id !== entityId));
+      }
+      setSuccessMsg('Merchant mapping removed successfully.');
+    } catch (err: any) {
+      console.error('Failed to delete merchant mapping:', err);
+      setError(err.message || 'Failed to remove merchant mapping');
+    }
+  };
+
+  // ── Save global workflow categories ──────────────────────────────────────
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     setSuccessMsg(null);
     try {
-      // Both saves are global config — zero org requests
       await Promise.all([
         orgApi.saveGstConfig({ rate_history: gstHistory }),
-        orgApi.saveWorkflowConfig({ categories, static_rules: staticRules }),
+        orgApi.saveWorkflowConfig({ categories, static_rules: [] }),
       ]);
       setSuccessMsg('System configurations saved successfully.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -473,82 +565,194 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Static Rules */}
+            {/* Merchant Mapping Directory */}
             <div className="space-y-3 pt-4 border-t border-slate-100">
               <div>
                 <div className="text-sm font-extrabold text-slate-700 mb-0.5">
-                  {s('rules_label', 'Static Bank Rules')}
+                  Merchant Category Directory
                 </div>
                 <p className="text-xs font-semibold text-slate-400">
-                  {s('rules_desc', 'Automatically classify imported transactions matching pattern strings to a specific category:')}
+                  Manage default bookkeeping categories and IRD tax details mapped to Suppliers and Customers:
                 </p>
               </div>
+
+              {/* Tab switcher */}
+              <div className="flex border-b border-slate-100 gap-6">
+                {(['Supplier', 'Customer'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => { setActiveEntityTab(tab); handleCancelEditEntity(); setError(null); }}
+                    className={`pb-2.5 text-[11px] font-black uppercase tracking-wider font-mono border-b-2 transition-all ${
+                      activeEntityTab === tab
+                        ? 'border-emerald-500 text-emerald-600'
+                        : 'border-transparent text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {tab === 'Supplier' ? `Suppliers (${suppliers.length})` : `Customers (${customers.length})`}
+                  </button>
+                ))}
+              </div>
+
+              {(() => {
+                const currentList = activeEntityTab === 'Supplier' ? suppliers : customers;
+                return (
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="w-full text-left text-xs font-semibold text-slate-700">
                   <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 border-b border-slate-200">
                     <tr>
-                      <th className="px-4 py-3">{s('rules_col_pattern', 'If Description Contains')}</th>
-                      <th className="px-4 py-3">{s('rules_col_category', 'Map to Category')}</th>
-                      <th className="px-4 py-3 text-right">{s('rules_col_actions', 'Actions')}</th>
+                      <th className="px-4 py-3">Merchant / Entity Name</th>
+                      <th className="px-4 py-3 w-32">IRD Number</th>
+                      <th className="px-4 py-3 w-48">Default Category</th>
+                      <th className="px-4 py-3 text-right w-36">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {staticRules.map((rule, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/40">
-                        <td className="px-4 py-3 font-mono text-slate-900 font-bold">"{rule.pattern}"</td>
-                        <td className="px-4 py-3">
-                          <span className="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-bold px-2.5 py-1 rounded-full">
-                            {rule.category}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveRule(idx)}
-                            className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer text-xs hover:underline"
-                          >
-                            {s('rules_delete', 'Delete')}
-                          </button>
+                    {currentList.map((ent) => {
+                      const isEditing = editingEntityId === ent.entity_id;
+                      return (
+                        <tr key={ent.entity_id} className="hover:bg-slate-50/40">
+                          <td className="px-4 py-3 font-bold text-slate-900">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
+                              />
+                            ) : (
+                              ent.entity_name
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editIrd}
+                                onChange={(e) => setEditIrd(e.target.value)}
+                                className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold font-mono text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
+                              />
+                            ) : (
+                              <span className="font-mono text-slate-500 font-bold">{ent.ird_number || '-'}</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <select
+                                value={editCategory}
+                                onChange={(e) => setEditCategory(e.target.value)}
+                                className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
+                              >
+                                {categories.map((c) => (
+                                  <option key={c} value={c}>{c}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-bold px-2.5 py-1 rounded-full">
+                                {ent.default_category}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {isEditing ? (
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEntityEdit(ent)}
+                                  className="text-emerald-600 hover:text-emerald-700 font-bold text-xs"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleCancelEditEntity}
+                                  className="text-slate-400 hover:text-slate-600 font-bold text-xs"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditEntity(ent)}
+                                  className="text-slate-600 hover:text-slate-800 font-bold text-xs"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveEntity(ent.entity_id)}
+                                  className="text-rose-500 hover:text-rose-700 font-bold text-xs"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {currentList.length === 0 && !entitiesLoading && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-5 text-center text-slate-400 font-semibold text-xs">
+                          No {activeEntityTab.toLowerCase()} mappings yet. They will auto-populate during CSV imports.
                         </td>
                       </tr>
-                    ))}
-                    {staticRules.length === 0 && (
+                    )}
+                    {entitiesLoading && (
                       <tr>
-                        <td colSpan={3} className="px-4 py-5 text-center text-slate-400 font-semibold text-xs">
-                          {s('rules_empty', 'No auto-matching rules configured.')}
+                        <td colSpan={4} className="px-4 py-5 text-center text-slate-400 font-semibold text-xs animate-pulse">
+                          Loading merchant mapping database...
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
+                );
+              })()}
+
+              {/* Add New Entity Form */}
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-3">
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono">
-                  {s('rules_add_title', '+ Add Routing Rule')}
+                  + Add {activeEntityTab} Mapping
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                   <div className="sm:col-span-5">
                     <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
-                      {s('rules_pattern_label', 'Pattern (case-insensitive contains)')}
+                      Merchant / Entity Name (Exact case matching)
                     </label>
                     <input
                       type="text"
-                      placeholder={s('rules_pattern_placeholder', 'e.g. Woolworths')}
-                      value={newRulePattern}
-                      onChange={(e) => setNewRulePattern(e.target.value)}
+                      placeholder="e.g. Woolworths"
+                      value={newEntityName}
+                      onChange={(e) => setNewEntityName(e.target.value)}
                       className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
                     />
                   </div>
-                  <div className="sm:col-span-5">
+                  <div className="sm:col-span-2">
                     <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
-                      {s('rules_category_label', 'Assign Category')}
+                      IRD Number
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 088-080-738"
+                      value={newEntityIrd}
+                      onChange={(e) => setNewEntityIrd(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold font-mono text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] font-extrabold uppercase text-slate-400 mb-1">
+                      Default Category
                     </label>
                     <select
-                      value={newRuleCategory}
-                      onChange={(e) => setNewRuleCategory(e.target.value)}
+                      value={newEntityCategory}
+                      onChange={(e) => setNewEntityCategory(e.target.value)}
                       className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer"
                     >
-                      <option value="">{s('rules_category_placeholder', '-- Choose Category --')}</option>
+                      <option value="">-- Choose Category --</option>
                       {categories.map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
@@ -557,10 +761,10 @@ export const SettingsPage: React.FC = () => {
                   <div className="sm:col-span-2">
                     <button
                       type="button"
-                      onClick={handleAddRule}
+                      onClick={handleAddEntity}
                       className="bg-slate-900 hover:bg-slate-700 text-white text-xs font-bold py-2 w-full rounded-lg transition cursor-pointer"
                     >
-                      {s('rules_add_btn', 'Add Rule')}
+                      Add Rule
                     </button>
                   </div>
                 </div>

@@ -41,7 +41,10 @@ const DEFAULT_MAPPINGS: GlobalFieldMapping[] = [
     amount_column: 'Amount',
     vendor_column: 'Details',
     description_columns: ['ProcessedDate'],
-    indicator_mode: 'auto'
+    indicator_mode: 'column',
+    indicator_column: 'Type',
+    debit_value: 'D',
+    credit_value: 'C'
   }
 ];
 

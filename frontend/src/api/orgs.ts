@@ -60,4 +60,14 @@ export const orgApi = {
   getWorkflowConfig: () => api.get<{ categories: string[]; static_rules: Array<{ pattern: string; category: string }> }>('config/workflow'),
   saveWorkflowConfig: (payload: { categories: string[]; static_rules: Array<{ pattern: string; category: string }> }) =>
     api.put<unknown>('config/workflow', payload),
+  getAllEntities: () =>
+    api.get<{ entities: Array<{ entity_id: string; entity_type: 'Supplier' | 'Customer'; entity_name: string; default_category: string; ird_number?: string; created_at?: string }> }>('entities/all'),
+  createEntity: (entityType: 'Supplier' | 'Customer', payload: { entity_name: string; default_category: string; ird_number?: string }) =>
+    api.post<any>(`entities/${entityType}`, payload),
+  updateEntity: (entityType: 'Supplier' | 'Customer', entityId: string, payload: { entity_name: string; default_category: string; ird_number?: string; created_at?: string }) =>
+    api.put<any>(`entities/${entityType}/${entityId}`, payload),
+  deleteEntity: (entityType: 'Supplier' | 'Customer', entityId: string) =>
+    api.delete<any>(`entities/${entityType}/${entityId}`),
+  categoriseVendors: (vendors: string[]) =>
+    api.post<{ categories: Record<string, string> }>('ai-assistant/categorise-tx', { vendors }),
 };

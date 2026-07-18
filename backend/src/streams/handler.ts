@@ -1,6 +1,6 @@
 import { DynamoDBStreamEvent } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { randomUUID } from 'crypto';
 
@@ -31,6 +31,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
 
       const isAR = sk.startsWith('OPENING#AR#');
       const isAP = sk.startsWith('OPENING#AP#');
+      const isTX = sk.startsWith('TX#');
 
       if (isAR || isAP) {
         // Extract org UUID (pk structure is ORG#<uuid> -> slice off first 4 characters)
@@ -49,10 +50,12 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
 
         console.log(`[Stream] Processing insert for org: "${orgId}". Found external entity name: "${rawEntityName}"`);
 
+        const entityType = isAR ? 'Customer' : 'Supplier';
+
         await ddb.send(new PutCommand({
           TableName: FOREIGN_ENTITIES_TABLE_NAME,
           Item: {
-            org_id: orgId,
+            entity_type: entityType,
             entity_id: entityId,
             entity_name: rawEntityName.trim(),
             ird_number: '',
@@ -61,7 +64,73 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
           },
         }));
 
-        console.log(`[Stream] Successfully registered foreign entity "${rawEntityName}" with entity_id "${entityId}"`);
+        console.log(`[Stream] Successfully registered foreign entity "${rawEntityName}" as "${entityType}"`);
+      }
+
+      if (isTX) {
+        const orgId = pk.startsWith('ORG#') ? pk.substring(4) : pk;
+        const rawEntityName = item.vendor;
+        const category = item.category;
+
+        if (!orgId || !rawEntityName) {
+          console.log('[Stream] Transaction item missing orgId or vendor. Skipping.');
+          continue;
+        }
+
+        const cleanEntityName = rawEntityName.trim();
+        const cleanCategory = category ? category.trim() : 'Uncategorized';
+        const entityType = item.type === 'income' || cleanCategory === 'Sales & Revenue' || cleanCategory === 'Other Income' ? 'Customer' : 'Supplier';
+
+        // 1. Query if a foreign entity with the same name already exists globally under this type
+        const response = await ddb.send(
+          new QueryCommand({
+            TableName: FOREIGN_ENTITIES_TABLE_NAME,
+            KeyConditionExpression: 'entity_type = :entity_type',
+            FilterExpression: 'entity_name = :entity_name',
+            ExpressionAttributeValues: {
+              ':entity_type': entityType,
+              ':entity_name': cleanEntityName,
+            },
+          })
+        );
+
+        const existingEntity = response.Items?.[0];
+        const utcNow = new Date().toISOString();
+
+        if (!existingEntity) {
+          // 2. Not exists: create new entity with default_category
+          const entityId = `ent-${randomUUID()}`;
+          console.log(`[Stream] Registering NEW foreign entity "${cleanEntityName}" under "${entityType}" with category "${cleanCategory}"`);
+          
+          await ddb.send(
+            new PutCommand({
+              TableName: FOREIGN_ENTITIES_TABLE_NAME,
+              Item: {
+                entity_type: entityType,
+                entity_id: entityId,
+                entity_name: cleanEntityName,
+                default_category: cleanCategory,
+                ird_number: '',
+                created_at: utcNow,
+                updated_at: utcNow,
+              },
+            })
+          );
+        } else if (existingEntity.default_category !== cleanCategory && cleanCategory !== 'Uncategorized') {
+          // 3. Exists but category changed: update default_category to keep mapping fresh
+          console.log(`[Stream] Updating existing foreign entity "${cleanEntityName}" under "${entityType}" from "${existingEntity.default_category}" to "${cleanCategory}"`);
+          
+          await ddb.send(
+            new PutCommand({
+              TableName: FOREIGN_ENTITIES_TABLE_NAME,
+              Item: {
+                ...existingEntity,
+                default_category: cleanCategory,
+                updated_at: utcNow,
+              },
+            })
+          );
+        }
       }
     } catch (err: any) {
       console.error('[Stream] Fatal error occurred while processing individual stream record. Continuing loop.', err);

@@ -5,8 +5,10 @@ import {
   QueryCommand,
   GetCommand,
   DeleteCommand,
+  ScanCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'crypto';
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { getGstRateForDate, clearGstCache } from '../common/gst';
 import { getOrSeedGlobalMappings } from '../common/mappings';
@@ -40,6 +42,8 @@ const verifier = CognitoJwtVerifier.create({
 });
 
 const cognitoClient = new CognitoIdentityProviderClient({});
+const bedrock = new BedrockRuntimeClient({ region: 'ap-southeast-2' });
+const FOREIGN_ENTITIES_TABLE_NAME = process.env.FOREIGN_ENTITIES_TABLE_NAME || '';
 
 // ── Types ───────────────────────────────────────
 interface OrgMetadata {
@@ -721,7 +725,7 @@ export async function handler(event: {
             const metadataItem = orgItems.find(item => item.sk === 'METADATA');
             if (metadataItem) {
               const bank_accounts = metadataItem.bank_accounts || [];
-              
+
               // Get bank balances
               const bankBalancesObj: Record<string, any> = {};
               orgItems
@@ -1294,8 +1298,6 @@ export async function handler(event: {
         nzbn: payload.nzbn !== undefined ? payload.nzbn : existingItem.nzbn,
         address: payload.address !== undefined ? payload.address : existingItem.address,
         payroll_cycle: payload.payroll_cycle !== undefined ? payload.payroll_cycle : existingItem.payroll_cycle,
-        categories: payload.categories !== undefined ? payload.categories : existingItem.categories,
-        static_rules: payload.static_rules !== undefined ? payload.static_rules : existingItem.static_rules,
         updated_at: new Date().toISOString(),
       };
 
@@ -1355,6 +1357,197 @@ export async function handler(event: {
       }
 
       return json(200, { message: "Organisation and opening balances updated successfully." });
+    }
+
+    // GET /entities/all — full scan, returns both Supplier and Customer
+    if (path === '/entities/all' && method === 'GET') {
+      const { Items = [] } = await ddb.send(
+        new ScanCommand({ TableName: FOREIGN_ENTITIES_TABLE_NAME })
+      );
+      return json(200, { entities: Items });
+    }
+
+    // GET & POST /entities/:entity_type (Supplier | Customer)
+    const entitiesMatch = path.match(/^\/entities\/(Supplier|Customer)$/);
+    if (entitiesMatch) {
+      const entityType = entitiesMatch[1];
+
+      if (method === 'GET') {
+        const { Items = [] } = await ddb.send(
+          new QueryCommand({
+            TableName: FOREIGN_ENTITIES_TABLE_NAME,
+            KeyConditionExpression: 'entity_type = :entity_type',
+            ExpressionAttributeValues: {
+              ':entity_type': entityType,
+            },
+          })
+        );
+        return json(200, { entities: Items });
+      }
+
+      if (method === 'POST') {
+        const payload = JSON.parse(rawBody);
+        if (!payload.entity_name || !payload.default_category) {
+          return json(400, { error: 'entity_name and default_category are required' });
+        }
+        const entityId = `ent-${randomUUID()}`;
+        const now = new Date().toISOString();
+        const item = {
+          entity_type: entityType,
+          entity_id: entityId,
+          entity_name: String(payload.entity_name).trim(),
+          default_category: String(payload.default_category).trim(),
+          ird_number: String(payload.ird_number || '').trim(),
+          created_at: now,
+          updated_at: now
+        };
+        await ddb.send(new PutCommand({
+          TableName: FOREIGN_ENTITIES_TABLE_NAME,
+          Item: item
+        }));
+        return json(201, item);
+      }
+    }
+
+    // PUT & DELETE /entities/:entity_type/:entity_id
+    const entityDetailMatch = path.match(/^\/entities\/(Supplier|Customer)\/(ent-[a-f0-9-]+)$/);
+    if (entityDetailMatch) {
+      const entityType = entityDetailMatch[1];
+      const entityId = entityDetailMatch[2];
+
+      if (method === 'PUT') {
+        const payload = JSON.parse(rawBody);
+        if (!payload.entity_name || !payload.default_category) {
+          return json(400, { error: 'entity_name and default_category are required' });
+        }
+        const now = new Date().toISOString();
+        const item = {
+          entity_type: entityType,
+          entity_id: entityId,
+          entity_name: String(payload.entity_name).trim(),
+          default_category: String(payload.default_category).trim(),
+          ird_number: String(payload.ird_number || '').trim(),
+          created_at: payload.created_at || now,
+          updated_at: now
+        };
+        await ddb.send(new PutCommand({
+          TableName: FOREIGN_ENTITIES_TABLE_NAME,
+          Item: item
+        }));
+        return json(200, item);
+      }
+
+      if (method === 'DELETE') {
+        await ddb.send(new DeleteCommand({
+          TableName: FOREIGN_ENTITIES_TABLE_NAME,
+          Key: {
+            entity_type: entityType,
+            entity_id: entityId
+          }
+        }));
+        return json(200, { message: 'Entity deleted successfully' });
+      }
+    }
+
+    // POST /ai-assistant/categorise-tx
+    if (method === 'POST' && path === '/ai-assistant/categorise-tx') {
+      const raw = JSON.parse(rawBody);
+      const vendors = raw.vendors;
+
+      if (!Array.isArray(vendors) || vendors.length === 0) {
+        return json(200, { categories: {} });
+      }
+
+      let categoriesPool: string[] = [];
+      try {
+        const configRes = await ddb.send(new GetCommand({
+          TableName: process.env.TABLE_NAME,
+          Key: {
+            pk: 'CONFIG#GLOBAL',
+            sk: 'WORKFLOW#SETTINGS'
+          }
+        }));
+        if (configRes.Item && Array.isArray(configRes.Item.categories)) {
+          categoriesPool = configRes.Item.categories;
+        }
+      } catch (dbErr) {
+        console.warn('[Bedrock] Failed to fetch dynamic categories, falling back to static pool:', dbErr);
+      }
+
+      if (categoriesPool.length === 0) {
+        categoriesPool = [
+          'Advertising & Marketing', 'Bank Fees & Interest', 'Consulting & Professional',
+          'Entertainment', 'Insurance', 'Motor Vehicle Expenses', 'Office Supplies & Post',
+          'Rent & Lease', 'Repairs & Maintenance', 'Software & IT Services',
+          'Subscriptions & Memberships', 'Travel & Accommodation', 'Utilities & Comm',
+          'Wages & Salaries', 'Sales & Revenue', 'Other Income', 'Cost of Goods Sold'
+        ];
+      }
+
+      const prompt = [
+        'You are a professional bookkeeper working with New Zealand and Australian small business bank statements.',
+        '',
+        'Your task: categorise each vendor/payee name into exactly one category from this allowed list:',
+        JSON.stringify(categoriesPool),
+        '',
+        'Rules:',
+        '1. Use ONLY categories from the list above. Never invent new categories.',
+        '2. If the vendor name looks like a bank account number (e.g. "01-0505-0780727-00"), a credit card number (e.g. "9554-****-****-1524"), or a fund transfer description (e.g. "To: 88890388-1001"), classify it as "Bank Fees & Interest".',
+        '3. NZ-specific: Spark = "Utilities & Comm", Vodafone = "Utilities & Comm", Contact Energy = "Utilities & Comm", ANZ/BNZ/ASB/Westpac fees = "Bank Fees & Interest", Southern Cross = "Insurance", AA Insurance = "Insurance", Kindo = "Office Supplies & Post", Snapper = "Travel & Accommodation".',
+        '4. Supermarkets, Asian supermarkets, restaurants, food suppliers = "Cost of Goods Sold".',
+        '5. If genuinely uncertain, prefer "Consulting & Professional" over "Other Income".',
+        '6. Return ONLY a valid JSON object. No markdown code fences, no explanation.',
+        '',
+        'Vendors to categorise:',
+        JSON.stringify(vendors),
+        '',
+        'Output format (raw JSON only):',
+        '{"vendor_name_1":"category","vendor_name_2":"category"}'
+      ].join('\n');
+
+      const requestPayload = {
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        inferenceConfig: {
+          temperature: 0.1,
+          max_new_tokens: 1500
+        }
+      };
+
+      let aiText = '';
+      try {
+        const response = await bedrock.send(new InvokeModelCommand({
+          modelId: 'amazon.nova-lite-v1:0',
+          contentType: 'application/json',
+          accept: 'application/json',
+          body: JSON.stringify(requestPayload)
+        }));
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+        aiText = responseBody.output.message.content[0].text;
+      } catch (err: any) {
+        console.error('[Bedrock] Amazon Nova Lite failed to invoke:', err);
+        return json(500, { error: `AI Assistant unavailable: ${err.message || 'InvokeModel failed'}` });
+      }
+
+      try {
+        let cleaned = aiText.trim();
+        if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+        }
+        const categoriesMap = JSON.parse(cleaned);
+        return json(200, { categories: categoriesMap });
+      } catch (parseErr: any) {
+        console.error('[Bedrock] Failed to parse AI categorization response. Raw text:', aiText, parseErr);
+        return json(500, { error: 'Failed to parse AI classification result. Clean formatting response error.' });
+      }
     }
 
     // ── Transactions API Routes ───────────────────────────────────────

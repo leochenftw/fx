@@ -325,6 +325,9 @@ export const ImportGuideModal: React.FC<ImportGuideModalProps> = ({
         throw new Error('The selected CSV file has no transactable rows.');
       }
 
+      const activePreset = globalMappings.find((m: any) => m.sk === selectedMappingSk) || recommendedMapping;
+      const isCredit = activePreset?.card_type === 'credit';
+
       // 3. Map to standard transaction entities
       const mappedTransactions: any[] = [];
       for (const row of rawRows) {
@@ -334,7 +337,7 @@ export const ImportGuideModal: React.FC<ImportGuideModalProps> = ({
 
         if (!rawDate || !rawAmount) continue; // Skip incomplete blank lines
 
-        const cents = parseAmountToCents(rawAmount);
+        const rawCents = parseAmountToCents(rawAmount);
 
         // Combine description columns
         const descVals = descriptionColumns
@@ -346,19 +349,33 @@ export const ImportGuideModal: React.FC<ImportGuideModalProps> = ({
         // Determine transaction type
         let txType: 'income' | 'expense' = 'expense';
         if (indicatorMode === 'auto') {
-          txType = cents >= 0 ? 'income' : 'expense';
+          // If the statement is credit card, positive values signify charges (expense) by default.
+          if (isCredit) {
+            txType = rawCents >= 0 ? 'expense' : 'income';
+          } else {
+            txType = rawCents >= 0 ? 'income' : 'expense';
+          }
         } else if (indicatorMode === 'column' && indicatorColumn) {
           const colVal = (row[indicatorColumn] || '').trim().toLowerCase();
           const dVal = (debitValue || '').trim().toLowerCase();
           const cVal = (creditValue || '').trim().toLowerCase();
+
           if (colVal === cVal) {
             txType = 'income';
           } else if (colVal === dVal) {
             txType = 'expense';
           } else {
-            txType = cents >= 0 ? 'income' : 'expense';
+            if (isCredit) {
+              txType = rawCents >= 0 ? 'expense' : 'income';
+            } else {
+              txType = rawCents >= 0 ? 'income' : 'expense';
+            }
           }
         }
+
+        // Force amount cents sign alignment to the resolved transaction direction:
+        // Income is strictly positive, Expense is strictly negative
+        const cents = txType === 'income' ? Math.abs(rawCents) : -Math.abs(rawCents);
 
         // Generate a stable raw hash input based on all physical column values (immune to mapping overrides)
         const rawHashString = Object.values(row)

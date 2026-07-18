@@ -29,7 +29,7 @@ export class CdkStack extends cdk.Stack {
     // 1.1 FxForeignEntitiesTable (Separate Table for Customers/Suppliers)
     // ──────────────────────────────────────────────
     const foreignEntitiesTable = new dynamodb.Table(this, 'FxForeignEntitiesTable', {
-      partitionKey: { name: 'org_id', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'entity_type', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'entity_id', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -127,16 +127,18 @@ export class CdkStack extends cdk.Stack {
         BUCKET_NAME: rawBucket.bucketName,
         COGNITO_USER_POOL_ID: userPool.userPoolId,
         COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
+        FOREIGN_ENTITIES_TABLE_NAME: foreignEntitiesTable.tableName,
       },
     });
 
     table.grantReadWriteData(orgsLambda);
+    foreignEntitiesTable.grantReadWriteData(orgsLambda);
     rawBucket.grantReadWrite(orgsLambda);
 
     // Bedrock access for future AI receipt extraction
     orgsLambda.addToRolePolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
-      resources: ['arn:aws:bedrock:ap-southeast-2::foundation-model/anthropic.claude-3-5-haiku-*'],
+      resources: ['arn:aws:bedrock:ap-southeast-2::foundation-model/amazon.nova-lite-*'],
     }));
 
     // Cognito Identity Provider access for Staff Management API (Admin Create/Delete/Get/List)

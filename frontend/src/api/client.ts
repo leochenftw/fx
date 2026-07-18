@@ -37,5 +37,5 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
     }),
-  del: <TResponse>(path: string) => request<TResponse>(path, { method: 'DELETE' }),
+  delete: <TResponse>(path: string) => request<TResponse>(path, { method: 'DELETE' }),
 };

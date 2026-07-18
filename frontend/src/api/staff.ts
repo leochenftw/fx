@@ -33,7 +33,7 @@ export const staffApi = {
   get: (staffId: string) => api.get<StaffDetailResponse>(`staff/${staffId}`),
   create: (payload: unknown) => api.post<unknown>('staff', payload),
   update: (staffId: string, payload: unknown) => api.put<unknown>(`staff/${staffId}`, payload),
-  delete: (staffId: string) => api.del<unknown>(`staff/${staffId}`),
+  delete: (staffId: string) => api.delete<unknown>(`staff/${staffId}`),
   assignOrg: (staffId: string, payload: unknown) => api.post<unknown>(`staff/${staffId}/orgs`, payload),
-  unassignOrg: (staffId: string, orgId: string) => api.del<unknown>(`staff/${staffId}/orgs/${orgId}`),
+  unassignOrg: (staffId: string, orgId: string) => api.delete<unknown>(`staff/${staffId}/orgs/${orgId}`),
 };
