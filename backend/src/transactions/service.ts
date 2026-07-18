@@ -18,7 +18,10 @@ export interface TransactionInput {
   category: string;
   gst_amount?: number; // Optional manual override
   receipt_s3_key?: string;
-  source?: 'manual' | 'voice' | 'bank_feed';
+  source?: 'manual' | 'voice' | 'bank_feed' | 'Bank Statement Import';
+  hash?: string; // Client-side dedup fingerprint
+  occur_idx?: number; // Occurrence index for same-hash entries in a single CSV
+  force_insert?: boolean; // Bypass cloud dedup lock when user explicitly confirms
 }
 
 export interface Transaction {
@@ -34,10 +37,17 @@ export interface Transaction {
   gst_type: 'input_tax' | 'output_tax' | 'zero_rated' | 'exempt' | 'non_taxable';
   category: string;
   receipt_s3_key?: string;
-  source: 'manual' | 'voice' | 'bank_feed';
+  source: 'manual' | 'voice' | 'bank_feed' | 'Bank Statement Import';
   matched_bank_statement_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface BatchImportResult {
+  imported: number;
+  skipped: number;
+  errors: number;
+  details: Array<{ hash?: string; occur_idx?: number; status: 'imported' | 'duplicate' | 'error'; error?: string }>;
 }
 
 export class ServiceError extends Error {
@@ -142,6 +152,84 @@ export async function createTransaction(orgId: string, input: TransactionInput):
 
   const { pk, sk, ...cleaned } = item;
   return cleaned as Transaction;
+}
+
+/**
+ * Batch imports transactions with cloud-side dedup via DynamoDB conditional writes.
+ * Uses the hash + occur_idx pair as a unique dedup lock key.
+ * If hash/occur_idx are not provided, the transaction is written unconditionally.
+ */
+export async function batchImportTransactions(
+  orgId: string,
+  inputs: TransactionInput[]
+): Promise<BatchImportResult> {
+  const result: BatchImportResult = { imported: 0, skipped: 0, errors: 0, details: [] };
+
+  // Process sequentially to maintain watermark consistency within the batch
+  for (const input of inputs) {
+    const { hash, occur_idx, force_insert } = input;
+
+    try {
+      // 1. If dedup fingerprint is provided, attempt conditional write on the DUP lock
+      if (hash && occur_idx !== undefined) {
+        const dupPk = `ORG#${orgId}#DUP`;
+        const dupSk = `HASH#${hash}#${occur_idx}`;
+
+        if (force_insert) {
+          // Force insert: overwrite DUP lock unconditionally to keep watermarks aligned
+          await ddb.send(new PutCommand({
+            TableName: TABLE_NAME,
+            Item: {
+              pk: dupPk,
+              sk: dupSk,
+              hash,
+              occur_idx,
+              force_inserted: true,
+              created_at: new Date().toISOString(),
+            },
+          }));
+        } else {
+          // Normal dedup: conditional write — fail if lock already exists
+          try {
+            await ddb.send(new PutCommand({
+              TableName: TABLE_NAME,
+              Item: {
+                pk: dupPk,
+                sk: dupSk,
+                hash,
+                occur_idx,
+                created_at: new Date().toISOString(),
+              },
+              ConditionExpression: 'attribute_not_exists(pk)',
+            }));
+          } catch (dupErr: any) {
+            if (dupErr.name === 'ConditionalCheckFailedException') {
+              // This hash+occur_idx combo already exists in cloud — skip as duplicate
+              result.skipped++;
+              result.details.push({ hash, occur_idx, status: 'duplicate' });
+              continue;
+            }
+            throw dupErr; // Re-throw unexpected errors
+          }
+        }
+      }
+
+      // 2. Write the actual transaction record
+      await createTransaction(orgId, input);
+      result.imported++;
+      result.details.push({ hash, occur_idx, status: 'imported' });
+    } catch (err: any) {
+      result.errors++;
+      result.details.push({
+        hash,
+        occur_idx,
+        status: 'error',
+        error: err.message || 'Unknown error',
+      });
+    }
+  }
+
+  return result;
 }
 
 /**

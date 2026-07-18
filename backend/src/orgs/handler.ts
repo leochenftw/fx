@@ -9,8 +9,10 @@ import {
 import { randomUUID } from 'crypto';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { getGstRateForDate, clearGstCache } from '../common/gst';
+import { getOrSeedGlobalMappings } from '../common/mappings';
 import {
   createTransaction,
+  batchImportTransactions,
   listTransactions,
   getTransaction,
   updateTransaction,
@@ -245,17 +247,8 @@ export async function handler(event: {
 
     // GET /config/mappings — Get all global CSV mappings
     if (method === 'GET' && path === '/config/mappings') {
-      const response = await ddb.send(
-        new QueryCommand({
-          TableName: TABLE_NAME,
-          KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
-          ExpressionAttributeValues: {
-            ':pk': 'CONFIG#GLOBAL',
-            ':prefix': 'MAPPING#',
-          },
-        })
-      );
-      return json(200, response.Items || []);
+      const mappings = await getOrSeedGlobalMappings();
+      return json(200, mappings);
     }
 
     // PUT /config/mappings/:bankName/:cardType — Save/update a global mapping
@@ -1373,13 +1366,43 @@ export async function handler(event: {
 
       if (method === 'POST') {
         const raw = JSON.parse(rawBody);
-        const payload = JSON.parse(rawBody);
+
+        // Batch import: POST body is an array of transactions
+        if (Array.isArray(raw)) {
+          if (raw.length === 0) {
+            return json(400, { error: 'Batch import array must not be empty.' });
+          }
+          if (raw.length > 500) {
+            return json(400, { error: 'Batch import array must not exceed 500 items.' });
+          }
+
+          const inputs = raw.map((item: any) => ({
+            date: String(item.date),
+            vendor: String(item.vendor),
+            description: item.description ? String(item.description) : undefined,
+            type: item.type,
+            gross_amount: Number(item.gross_amount),
+            gst_type: item.gst_type,
+            category: String(item.category || 'Uncategorized'),
+            gst_amount: item.gst_amount !== undefined ? Number(item.gst_amount) : undefined,
+            receipt_s3_key: item.receipt_s3_key ? String(item.receipt_s3_key) : undefined,
+            source: item.source || 'Bank Statement Import',
+            hash: item.hash ? String(item.hash) : undefined,
+            occur_idx: item.occur_idx !== undefined ? Number(item.occur_idx) : undefined,
+            force_insert: item.force_insert === true,
+          }));
+
+          const result = await batchImportTransactions(orgId, inputs);
+          return json(201, result);
+        }
+
+        // Single transaction creation (backward compatible)
         const tx = await createTransaction(orgId, {
           date: String(raw.date),
           vendor: String(raw.vendor),
           description: raw.description ? String(raw.description) : undefined,
           type: raw.type,
-          gross_amount: Number(raw.gross_amount), // 强转为数字，绝不留情
+          gross_amount: Number(raw.gross_amount),
           gst_type: raw.gst_type,
           category: String(raw.category),
           gst_amount: raw.gst_amount !== undefined ? Number(raw.gst_amount) : undefined,

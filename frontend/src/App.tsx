@@ -28,6 +28,8 @@ import { SupportPage } from './pages/SupportPage';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { Sidebar } from './components/Sidebar';
+import { ImportGuideModal } from './components/ImportGuideModal';
+import { ImportPreviewModal } from './components/ImportPreviewModal';
 
 // Initialize AWS Cognito User Pool
 export const userPool = new CognitoUserPool({
@@ -113,6 +115,17 @@ export default function App() {
   const [orgsLastKey, setOrgsLastKey] = useState<string | null>(null);
   const [fetchingMoreOrgs, setFetchingMoreOrgs] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
+
+  // Bank statement import state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [showImportGuide, setShowImportGuide] = useState<boolean>(false);
+  const [showImportPreview, setShowImportPreview] = useState<boolean>(false);
+  const [previewPayload, setPreviewPayload] = useState<{
+    orgId: string;
+    orgName: string;
+    bankAccount: string;
+    transactions: any[];
+  } | null>(null);
   const orgsFetchedRef = useRef(false);
   const authInitRef = useRef(false);
 
@@ -197,6 +210,8 @@ export default function App() {
   useEffect(() => {
     if (isLoggedIn && !loading) {
       bootstrapApp();
+      fetchOrgs();
+      import('./utils/indexeddb').then(m => m.logAllFingerprints());
     }
   }, [isLoggedIn, loading]);
 
@@ -292,6 +307,11 @@ export default function App() {
     <div className="min-h-screen md:h-screen md:overflow-hidden bg-slate-50 text-slate-800 antialiased flex flex-col justify-between font-sans">
       <Header
         isLoggedIn={isLoggedIn}
+        orgs={orgs}
+        onImportFileSelect={(file) => {
+          setSelectedFile(file);
+          setShowImportGuide(true);
+        }}
         statusText={
           isNewPasswordRequired
             ? t('header.setup_mode')
@@ -504,6 +524,57 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+
+      <ImportGuideModal
+        isOpen={showImportGuide}
+        onClose={() => {
+          setShowImportGuide(false);
+          setSelectedFile(null);
+        }}
+        file={selectedFile}
+        orgs={orgs}
+        loadingOrgs={loading}
+        onOrgUpdate={async () => {
+          await fetchOrgs(true);
+        }}
+        onNext={(payload) => {
+          console.log('[App] Step 1 Complete:', payload);
+          const orgName = orgs.find(o => o.id === payload.orgId)?.name || payload.orgId;
+          
+          setPreviewPayload({
+            orgId: payload.orgId,
+            orgName,
+            bankAccount: payload.bankAccount,
+            transactions: payload.transactions
+          });
+          
+          setShowImportGuide(false);
+          setShowImportPreview(true);
+        }}
+      />
+
+      {previewPayload && (
+        <ImportPreviewModal
+          isOpen={showImportPreview}
+          onClose={() => {
+            setShowImportPreview(false);
+            setPreviewPayload(null);
+            setSelectedFile(null);
+          }}
+          orgId={previewPayload.orgId}
+          orgName={previewPayload.orgName}
+          bankAccount={previewPayload.bankAccount}
+          transactions={previewPayload.transactions}
+          onImportComplete={() => {
+            setShowImportPreview(false);
+            setPreviewPayload(null);
+            setSelectedFile(null);
+            alert('Transactions imported and registered successfully!');
+            fetchOrgs(true);
+            import('./utils/indexeddb').then(m => m.logAllFingerprints());
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -4,3 +4,4 @@ frontend/node_modules
 designs
 DeployManual.txt
 cdk/cdk-exports.json
+frontend/.env

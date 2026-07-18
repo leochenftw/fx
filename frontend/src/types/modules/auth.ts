@@ -11,6 +11,8 @@ export interface HeaderProps {
   showLogout?: boolean;
   onLogout?: () => void;
   isLoggedIn?: boolean;
+  onImportFileSelect?: (file: File) => void;
+  orgs?: any[];
 }
 
 export interface LoginFormProps {

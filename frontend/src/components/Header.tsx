@@ -2,7 +2,61 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import type { HeaderProps } from '../types';
 
-export const Header: React.FC<HeaderProps> = ({ isLoggedIn = false }) => {
+export const Header: React.FC<HeaderProps> = ({ isLoggedIn = false, onImportFileSelect, orgs = [] }) => {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // 1. Check extension
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Invalid file format. Only bank statement files in .csv format are supported.');
+        e.target.value = '';
+        return;
+      }
+
+      // 2. Check empty file
+      if (file.size === 0) {
+        alert('The selected CSV file is empty.');
+        e.target.value = '';
+        return;
+      }
+
+      // 3. Limit size (prevent loading huge binary files that cause page freeze, 5MB is more than enough for transactions)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('File size exceeds the limit. Statement file must be smaller than 5MB.');
+        e.target.value = '';
+        return;
+      }
+
+      onImportFileSelect?.(file);
+      e.target.value = '';
+    }
+  };
+
+  const userGroups = React.useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user_groups') || '[]');
+    } catch {
+      return [];
+    }
+  }, [isLoggedIn]);
+
+  const isSystemOwner = userGroups.includes('OWNER');
+
+  const currentOrgId = React.useMemo(() => {
+    const match = window.location.pathname.match(/^\/orgs\/([a-f0-9-]+)/);
+    return match ? match[1] : '';
+  }, [window.location.pathname]);
+
+  const hasImportAccess = React.useMemo(() => {
+    if (isSystemOwner) return true;
+    if (currentOrgId) {
+      const currentOrg = orgs.find(o => o.id === currentOrgId);
+      return currentOrg?.role === 'OWNER' || currentOrg?.role === 'ADMIN';
+    }
+    return orgs.some(org => org.role === 'OWNER' || org.role === 'ADMIN');
+  }, [isSystemOwner, orgs, currentOrgId]);
   // Pure JavaScript timezone converter (100% dependency-free & immune to supply-chain vulnerabilities)
   const getLocalTime = (utcStr: string): string => {
     try {
@@ -61,19 +115,29 @@ export const Header: React.FC<HeaderProps> = ({ isLoggedIn = false }) => {
       {/* ── RIGHT SECTION: Actions, Billing, Bell Notification ── */}
       <div className="flex items-center space-x-3.5">
 
-        {/* Call to Action: Import statements */}
         {isLoggedIn && (
           <>
-            <button
-              disabled
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-90 text-white font-semibold text-xs px-4 py-1.5 rounded-lg flex items-center space-x-1 shadow-sm transition cursor-not-allowed"
-              title="Import Bank Statements (Coming Soon)"
-            >
-              <span className="material-icons text-sm leading-none">add</span>
-              <span>Import Statements</span>
-            </button>
+            {/* Call to Action: Import statements */}
+            {hasImportAccess && (
+              <>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept=".csv"
+                  onChange={handleFileChange}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-1.5 rounded-lg flex items-center space-x-1 shadow-sm transition cursor-pointer"
+                >
+                  <span className="material-icons text-sm leading-none">add</span>
+                  <span>Import Statements</span>
+                </button>
 
-            <span className="h-4 w-px bg-slate-800"></span>
+                <span className="h-4 w-px bg-slate-800"></span>
+              </>
+            )}
 
             {/* AWS Estimate Bill Badge */}
             <div
