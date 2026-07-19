@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { transactionApi } from '../api/transactions';
 import { saveFingerprints } from '../utils/indexeddb';
 import { orgApi } from '../api/orgs';
+import { TransactionTable } from './TransactionTable';
 
 const STANDARD_CATEGORIES = [
   'Advertising & Marketing',
@@ -21,147 +23,10 @@ const STANDARD_CATEGORIES = [
   'Sales & Revenue',
   'Other Income',
   'Cost of Goods Sold',
+  'Taxes',
+  'Transfer',
   'Uncategorized'
 ];
-
-interface CategoryComboboxProps {
-  value: string;
-  onChange: (val: string) => void;
-  onAskAi: () => void;
-  aiLoading?: boolean;
-  categories: string[];
-}
-
-const CategoryCombobox: React.FC<CategoryComboboxProps> = ({
-  value,
-  onChange,
-  onAskAi,
-  aiLoading = false,
-  categories
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [search, setSearch] = useState(value);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    setSearch(value);
-  }, [value]);
-
-  React.useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-        setSearch(value);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [value]);
-
-  const filtered = useMemo(() => {
-    const term = search.toLowerCase().trim();
-    if (!term) return categories;
-    return categories.filter(c => c.toLowerCase().includes(term));
-  }, [search, categories]);
-
-  const handleSelect = (val: string) => {
-    onChange(val);
-    setSearch(val);
-    setIsOpen(false);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      const trimmed = search.trim();
-      if (trimmed) {
-        handleSelect(trimmed);
-      }
-    }
-  };
-
-  return (
-    <div ref={containerRef} className="relative w-full min-w-[200px]" onClick={e => e.stopPropagation()}>
-      <div className={`flex items-center gap-1.5 bg-white border rounded-xl px-2.5 py-1.5 transition ${value === 'Uncategorized' ? 'border-rose-400 hover:border-rose-500' : 'border-slate-200 hover:border-slate-300'}`}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => {
-            setSearch(e.target.value);
-            setIsOpen(true);
-          }}
-          onFocus={() => setIsOpen(true)}
-          onKeyDown={handleKeyDown}
-          className={`text-[11px] font-extrabold focus:outline-none min-w-0 flex-grow bg-transparent placeholder-slate-400 ${value === 'Uncategorized' ? 'text-rose-500' : 'text-slate-800'}`}
-          placeholder="Type or select..."
-        />
-        {search.trim() !== '' && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setSearch('');
-            }}
-            title="Clear category"
-            className="flex items-center justify-center w-3.5 h-3.5 rounded-full text-slate-500 hover:text-slate-700 transition flex-shrink-0"
-          >
-            <span className="material-icons text-[9px] leading-none">close</span>
-          </button>
-        )}
-        {aiLoading ? (
-          <span className="material-icons text-slate-400 text-[10px] animate-spin">sync</span>
-        ) : (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onAskAi();
-            }}
-            title="Ask AI to categorize"
-            className="text-slate-400 hover:text-emerald-600 transition flex items-center cursor-pointer"
-          >
-            <span className="material-icons text-xs">auto_awesome</span>
-          </button>
-        )}
-      </div>
-
-      {isOpen && (
-        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-2xl py-1.5 max-h-48 overflow-y-auto z-50 animate-in fade-in slide-in-from-top-1 duration-150">
-          {filtered.map(cat => (
-            <button
-              key={cat}
-              onClick={() => handleSelect(cat)}
-              className={`w-full text-left px-3.5 py-1.5 text-xs font-semibold transition hover:bg-slate-50 ${cat === value ? 'text-slate-900 font-black bg-slate-50' : 'text-slate-600'
-                }`}
-            >
-              {cat}
-            </button>
-          ))}
-
-          {search.trim() && !categories.some(c => c.toLowerCase() === search.toLowerCase().trim()) && (
-            <button
-              onClick={() => handleSelect(search.trim())}
-              className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-400 hover:bg-slate-50 border-t border-slate-100 italic flex items-center gap-1"
-            >
-              <span className="material-icons text-[11px]">add</span>
-              <span>Use Custom: "{search.trim()}"</span>
-            </button>
-          )}
-
-          {/* Ask AI to classify option - positioned at the end of the list */}
-          <button
-            onClick={() => {
-              onAskAi();
-              setIsOpen(false);
-            }}
-            disabled={aiLoading}
-            className="w-full text-left px-3.5 py-2.5 text-xs font-bold text-emerald-600 hover:bg-emerald-50 flex items-center gap-1.5 border-t border-slate-100"
-          >
-            <span className="material-icons text-[11px] animate-pulse">auto_awesome</span>
-            <span>Ask AI to classify this...</span>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
 
 function parseToISODate(dateStr: string): string {
   const clean = dateStr.trim();
@@ -193,6 +58,7 @@ interface TransactionItem {
   hash: string;
   occurIdx: number; // The static occurrence count of the hash in the CSV file
   isDuplicate: boolean;
+  category?: string;
 }
 
 interface ImportPreviewModalProps {
@@ -214,6 +80,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   transactions,
   onImportComplete
 }) => {
+  const navigate = useNavigate();
   const [hideDuplicates, setHideDuplicates] = useState<boolean>(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -223,7 +90,8 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   const [forceInsertIds, setForceInsertIds] = useState<Set<string>>(new Set());
 
   const [previewTxs, setPreviewTxs] = useState<Array<TransactionItem & { category: string }>>([]);
-  const [aiLoading, setAiLoading] = useState<boolean>(false);
+  const [aiUpdatingId, setAiUpdatingId] = useState<string | null>(null);
+  const aiLoading = aiUpdatingId !== null;
   const [categories, setCategories] = useState<string[]>([]);
   const [aiConfirm, setAiConfirm] = useState<{
     isOpen: boolean;
@@ -241,10 +109,10 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
         const fetchedCats = configRes.categories || [];
         setCategories(fetchedCats.length > 0 ? fetchedCats : STANDARD_CATEGORIES);
 
-        // Apply initial matching (default to Uncategorized until AI or user sets it)
+        // Apply initial matching (use the category mapped from CSV Type column if available, else default to Uncategorized)
         const initial = transactions.map(tx => ({
           ...tx,
-          category: 'Uncategorized'
+          category: tx.category || 'Uncategorized'
         }));
         setPreviewTxs(initial);
 
@@ -269,7 +137,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   }, [isOpen, transactions, orgId]);
 
   // Filtered transactions to display in table
-  const visibleTxs = useMemo(() => {
+  const visibleTxs = React.useMemo(() => {
     if (hideDuplicates) {
       return previewTxs.filter(t => !t.isDuplicate);
     }
@@ -283,7 +151,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   const selectedCount = selectedIds.size;
 
   // Uncategorized count among visible transactions
-  const uncategorizedCount = useMemo(() => {
+  const uncategorizedCount = React.useMemo(() => {
     return previewTxs.filter(t => t.category === 'Uncategorized' && (!hideDuplicates || !t.isDuplicate)).length;
   }, [previewTxs, hideDuplicates]);
 
@@ -325,7 +193,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
 
   // Bottom-level AI executor
   const executeBatchAiCategorize = async (vendors: string[]) => {
-    setAiLoading(true);
+    setAiUpdatingId('batch');
     setImportError(null);
     try {
       const res = await orgApi.categoriseVendors(vendors);
@@ -343,12 +211,12 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
       console.error('[AI Batch Categorise] Error:', err);
       setImportError(err.message || 'AI Assistant failed to classify. Check model settings.');
     } finally {
-      setAiLoading(false);
+      setAiUpdatingId(null);
     }
   };
 
   const executeSingleAiCategorize = async (vendor: string, txId: string) => {
-    setAiLoading(true);
+    setAiUpdatingId(txId);
     try {
       const res = await orgApi.categoriseVendors([vendor.trim()]);
       const matchedCat = res.categories?.[vendor.trim()];
@@ -363,7 +231,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     } catch (err: any) {
       console.error('[AI Single Categorise] Error:', err);
     } finally {
-      setAiLoading(false);
+      setAiUpdatingId(null);
     }
   };
 
@@ -465,6 +333,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
 
       // Success Callback
       onImportComplete();
+      navigate('/transactions');
     } catch (err: any) {
       console.error('Fatal batch import error:', err);
       setImportError(err.message || 'Bulk import failed. Please verify network connections.');
@@ -556,83 +425,19 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
               <span className="text-xs">All records might have been filtered as duplicates. Toggle "Hide Duplicates" to review.</span>
             </div>
           ) : (
-            <table className="w-full text-left border-collapse">
-              <thead className="sticky top-0 bg-slate-100 border-b border-slate-200 z-10">
-                <tr>
-                  <th className="p-4 w-12 text-center">
-                    <input
-                      type="checkbox"
-                      checked={visibleTxs.length > 0 && visibleTxs.every(t => selectedIds.has(t.id))}
-                      onChange={handleToggleSelectAll}
-                      className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
-                    />
-                  </th>
-                  <th className="p-4 text-xs font-black uppercase text-slate-500 tracking-wider font-mono">Date</th>
-                  <th className="p-4 text-xs font-black uppercase text-slate-500 tracking-wider font-mono">Vendor / Payee</th>
-                  <th className="p-4 text-xs font-black uppercase text-slate-500 tracking-wider font-mono">Description</th>
-                  <th className="p-4 text-xs font-black uppercase text-slate-500 tracking-wider font-mono w-64">Category</th>
-                  <th className="p-4 text-xs font-black uppercase text-slate-500 tracking-wider font-mono text-right">Amount</th>
-                  <th className="p-4 text-xs font-black uppercase text-slate-500 tracking-wider font-mono text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {visibleTxs.map((tx) => {
-                  const isSelected = selectedIds.has(tx.id);
-                  return (
-                    <tr
-                      key={tx.id}
-                      onClick={() => handleToggleRow(tx.id)}
-                      className={`hover:bg-slate-50/80 transition cursor-pointer ${tx.isDuplicate
-                          ? 'bg-amber-50/30 text-slate-400'
-                          : isSelected
-                            ? 'bg-emerald-50/20'
-                            : 'bg-white'
-                        }`}
-                    >
-                      <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleRow(tx.id)}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
-                        />
-                      </td>
-                      <td className="p-4 text-xs font-bold font-mono whitespace-nowrap">{tx.date}</td>
-                      <td className="p-4 text-xs font-extrabold max-w-[180px] truncate">{tx.vendor}</td>
-                      <td className="p-4 text-xs font-semibold text-slate-500 max-w-[240px] truncate">
-                        {tx.description || '-'}
-                      </td>
-                      <td className="p-4 w-64" onClick={(e) => e.stopPropagation()}>
-                        <CategoryCombobox
-                          value={tx.category}
-                          onChange={(newCat) => handleRowCategoryChange(tx.id, newCat)}
-                          onAskAi={() => handleSingleAiCategorize(tx.vendor, tx.id)}
-                          aiLoading={aiLoading}
-                          categories={categories}
-                        />
-                      </td>
-                      <td className={`p-4 text-xs font-black text-right font-mono whitespace-nowrap ${tx.type === 'income' ? 'text-emerald-600' : 'text-slate-800'
-                        }`}>
-                        {tx.type === 'income' ? '+' : '-'}${(Math.abs(tx.amountCents) / 100).toFixed(2)}
-                      </td>
-                      <td className="p-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        {tx.isDuplicate ? (
-                          <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full">
-                            <span className="material-icons text-[11px]">history</span>
-                            <span>Duplicate</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">
-                            <span className="material-icons text-[11px]">bolt</span>
-                            <span>Ready</span>
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <TransactionTable
+              transactions={visibleTxs}
+              selectedIds={selectedIds}
+              onToggleSelectAll={handleToggleSelectAll}
+              onToggleRow={handleToggleRow}
+              onRowCategoryChange={handleRowCategoryChange}
+              onSingleAiCategorize={handleSingleAiCategorize}
+              aiUpdatingId={aiUpdatingId}
+              categories={categories}
+              showSelection={true}
+              showStatus={true}
+              showCategorySelect={true}
+            />
           )}
         </div>
 

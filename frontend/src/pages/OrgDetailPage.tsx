@@ -5,22 +5,10 @@ import { getValidToken } from '../App';
 import { cognitoConfig } from '../cognitoConfig';
 import { getInitials } from '../utils/name';
 import type { OrganisationDetail } from '../types';
+import { transactionApi } from '../api/transactions';
+import { orgApi } from '../api/orgs';
+import { TransactionTable } from '../components/TransactionTable';
 
-// 50 mock transactions
-const mockTransactionsData = Array.from({ length: 50 }, (_, idx) => {
-  const isIncome = idx % 3 === 0;
-  const amount = isIncome ? (150 + idx * 80) : -(45 + idx * 12);
-  const desc = isIncome
-    ? ['Payment from Fletchers NZ', 'Consulting invoice received', 'GST Refund received', 'Dividends payout'][idx % 4]
-    : ['Bunnings Trade - Plywood', 'Z Energy Fuel - Petone', 'Spark NZ - Monthly Plan', 'Mico Plumbing Supply', 'Mitre 10 Petone'][idx % 5];
-  const date = `${(10 - idx % 10) || 1} Jul`;
-  return {
-    date,
-    desc: `${desc} #${idx + 1}`,
-    amount,
-    status: idx % 6 === 0 ? 'pending' : 'cleared'
-  };
-});
 
 // 30 mock bills
 const mockBillsData = Array.from({ length: 30 }, (_, idx) => {
@@ -62,6 +50,97 @@ export const OrgDetailPage: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
   const fetchedRef = useRef<string | null>(null);
 
+  // Real transactions and workflow categories state
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+  const [aiUpdatingId, setAiUpdatingId] = useState<string | null>(null);
+
+  // Automatically sync active organisation context
+  useEffect(() => {
+    if (orgId) {
+      localStorage.setItem('active_org_id', orgId);
+    }
+  }, [orgId]);
+
+  // Fetch real transaction lists and category configurations
+  useEffect(() => {
+    if (!orgId) return;
+
+    const fetchTxData = async () => {
+      setTxLoading(true);
+      setTxError(null);
+      try {
+        const [txRes, configRes] = await Promise.all([
+          transactionApi.list(orgId),
+          orgApi.getWorkflowConfig()
+        ]);
+        setTransactions(txRes.transactions || []);
+        setCategories(configRes.categories || []);
+      } catch (err: any) {
+        console.error('Failed to load organisation transactions:', err);
+        setTxError(err.message || 'Failed to retrieve transactions.');
+      } finally {
+        setTxLoading(false);
+      }
+    };
+
+    fetchTxData();
+  }, [orgId]);
+
+  const handleCategoryChange = async (txId: string, newCat: string) => {
+    if (!orgId) return;
+    const targetTx = transactions.find(t => t.id === txId);
+    if (!targetTx) return;
+
+    const originalCategory = targetTx.category;
+
+    // Optimistic UI Update
+    setTransactions(prev => prev.map(t => t.id === txId ? { ...t, category: newCat } : t));
+
+    try {
+      await transactionApi.update(orgId, targetTx.date, txId, {
+        category: newCat
+      });
+    } catch (err: any) {
+      console.error('Failed to update category:', err);
+      alert(`Failed to save category: ${err.message || 'Network error'}`);
+      // Rollback
+      setTransactions(prev => prev.map(t => t.id === txId ? { ...t, category: originalCategory } : t));
+    }
+  };
+
+  const handleSingleAiCategorize = async (vendor: string, txId: string) => {
+    const targetTx = transactions.find(t => t.id === txId);
+    if (!targetTx) return;
+
+    // Prompt estimate cost before execution to satisfy UX security
+    const confirmed = window.confirm(
+      `This will send 1 unique vendor name "${vendor.trim()}" to AWS Bedrock to analyze context and estimate standard bookkeeping categories.\n\n` +
+      `Estimated size: ~450 tokens\n` +
+      `Estimated cost: ~$0.00020 USD\n\n` +
+      `Do you want to proceed?`
+    );
+    if (!confirmed) return;
+
+    setAiUpdatingId(txId);
+    try {
+      const res = await orgApi.categoriseVendors([vendor.trim()]);
+      const matchedCat = res.categories?.[vendor.trim()];
+      if (matchedCat) {
+        await handleCategoryChange(txId, matchedCat);
+      } else {
+        alert('AI Assistant could not determine a category for this vendor.');
+      }
+    } catch (err: any) {
+      console.error('[AI Single Categorise] Error:', err);
+      alert(`AI Assistant error: ${err.message || 'Service unavailable'}`);
+    } finally {
+      setAiUpdatingId(null);
+    }
+  };
+
   // Derive activeTab from route location path
   const location = useLocation();
   const path = location.pathname;
@@ -81,12 +160,11 @@ export const OrgDetailPage: React.FC = () => {
 
   // Pagination limits, starting with 20 items per batch
   const [limits, setLimits] = useState({
-    transactions: 20,
     bills: 20,
     invoices: 20
   });
 
-  const handleLoadMore = (tab: 'transactions' | 'bills' | 'invoices') => {
+  const handleLoadMore = (tab: 'bills' | 'invoices') => {
     setLimits((prev) => ({
       ...prev,
       [tab]: prev[tab] + 20
@@ -405,43 +483,42 @@ export const OrgDetailPage: React.FC = () => {
             <div className="p-6">
               {/* ── Transactions Tab ── */}
               {activeTab === 'transactions' && (
-                <div className="divide-y divide-slate-100 text-xs">
-                  {mockTransactionsData.slice(0, limits.transactions).map((tx, i) => {
-                    const acctNo = tx.desc.includes('Bunnings') || tx.desc.includes('Fletchers') || tx.desc.includes('Spark')
-                      ? (org.bank_accounts?.[0]?.account_number || '00-1004')
-                      : (org.bank_accounts?.[1]?.account_number || org.bank_accounts?.[0]?.account_number || '00-2700');
-
-                    return (
-                      <div key={i} className="py-3.5 flex items-center justify-between animate-in content-visibility-auto">
-                        <div className="flex items-center space-x-3">
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${tx.amount >= 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                          <div>
-                            <p className="font-bold text-slate-900">{tx.desc}</p>
-                            <p className="text-slate-400 text-[11px] mt-0.5">
-                              {tx.date} · <span className="font-mono">••{acctNo.slice(-4)}</span>
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className={`font-black block text-sm ${tx.amount >= 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
-                            {tx.amount >= 0 ? '+' : ''}{new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(tx.amount)}
-                          </span>
-                          <span className={`text-[10px] font-bold uppercase tracking-wider ${tx.status === 'cleared' ? 'text-slate-400' : 'text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded'
-                            }`}>
-                            {tx.status === 'cleared' ? 'Cleared' : 'Pending'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {limits.transactions < mockTransactionsData.length && (
-                    <div className="pt-4 text-center">
-                      <button
-                        onClick={() => handleLoadMore('transactions')}
-                        className="text-xs font-bold text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-100/50 px-5 py-2 rounded-xl transition duration-200 cursor-pointer shadow-sm"
-                      >
-                        Load more ({limits.transactions} of {mockTransactionsData.length} shown)
-                      </button>
+                <div className="space-y-4">
+                  {txLoading ? (
+                    <div className="flex flex-col justify-center items-center py-10 space-y-2">
+                      <div className="w-6 h-6 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
+                      <p className="text-xs font-semibold text-slate-400">Loading transactions...</p>
+                    </div>
+                  ) : txError ? (
+                    <div className="text-center py-10 text-rose-500 text-xs font-semibold">
+                      Failed to load transactions: {txError}
+                    </div>
+                  ) : transactions.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 text-xs font-medium">
+                      No transaction records found. Try importing some bank statements first!
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-100 rounded-xl">
+                      <TransactionTable
+                        transactions={transactions.map(tx => ({
+                          id: tx.id,
+                          date: tx.date,
+                          vendor: tx.vendor || 'Unknown',
+                          description: tx.description,
+                          category: tx.category || 'Uncategorized',
+                          gross_amount: tx.gross_amount,
+                          type: tx.type,
+                          reconciled: !!tx.matched_bank_statement_id || tx.reconciled === true
+                        }))}
+                        onRowCategoryChange={handleCategoryChange}
+                        onSingleAiCategorize={handleSingleAiCategorize}
+                        aiUpdatingId={aiUpdatingId}
+                        categories={categories}
+                        showSelection={false}
+                        showStatus={true}
+                        showCategorySelect={true}
+                        showDescription={false}
+                      />
                     </div>
                   )}
                 </div>

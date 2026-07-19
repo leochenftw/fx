@@ -45,6 +45,10 @@ export interface OrgFormProps {
   setAddress?: (val: string) => void;
   payrollCycle?: 'weekly' | 'fortnightly' | 'monthly';
   setPayrollCycle?: (val: 'weekly' | 'fortnightly' | 'monthly') => void;
+  conversionDate?: string;
+  setConversionDate?: (val: string) => void;
+  taxYearEndMonth?: number;
+  setTaxYearEndMonth?: (val: number) => void;
 }
 
 export interface HomePageProps {

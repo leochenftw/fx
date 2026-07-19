@@ -32,6 +32,8 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
   const [payrollCycle, setPayrollCycle] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [categories, setCategories] = useState<string[]>([]);
   const [staticRules, setStaticRules] = useState<{ pattern: string; category: string }[]>([]);
+  const [conversionDate, setConversionDate] = useState('2026-04-01');
+  const [taxYearEndMonth, setTaxYearEndMonth] = useState<number>(3);
 
   // 1. Fetch existing organisation configuration on mount
   useEffect(() => {
@@ -63,6 +65,8 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
           setPayrollCycle(data.payroll_cycle || 'weekly');
           setCategories(data.categories || []);
           setStaticRules(data.static_rules || []);
+          setConversionDate(data.conversion_date || '2026-04-01');
+          setTaxYearEndMonth(data.tax_year_end_month || 3);
 
           // Map bank accounts
           if (data.bank_accounts && Array.isArray(data.bank_accounts)) {
@@ -72,8 +76,7 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
                 account_name: acc.account_name || '',
                 account_number: acc.account_number || '',
                 bank_name: acc.bank_name || '',
-                balance: detail ? detail.balance : undefined,
-                conversion_date: detail ? detail.conversion_date : '2026-04-01',
+                balance: detail ? detail.balance : 0,
               };
             });
             setBankAccounts(list);
@@ -119,7 +122,7 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
   const addBankAccount = () => {
     setBankAccounts([
       ...bankAccounts,
-      { account_name: '', account_number: '', bank_name: '', balance: undefined, conversion_date: '2026-04-01' },
+      { account_name: '', account_number: '', bank_name: '', balance: 0 },
     ]);
   };
 
@@ -189,10 +192,10 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
 
     const bank_balances: Record<string, BankOpeningDetail> = {};
     const accountsInfo = bankAccounts.map((acc) => {
-      if (acc.account_number && acc.balance !== undefined && acc.conversion_date) {
+      if (acc.account_number && acc.balance !== undefined) {
         bank_balances[acc.account_number] = {
           balance: Number(acc.balance),
-          conversion_date: acc.conversion_date,
+          conversion_date: conversionDate,
         };
       }
 
@@ -244,6 +247,8 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
       payroll_cycle: payrollCycle,
       categories,
       static_rules: staticRules,
+      conversion_date: conversionDate,
+      tax_year_end_month: taxYearEndMonth,
       opening_balances: {
         bank_balances,
         ar_balances,
@@ -316,6 +321,10 @@ export const OrgEditPage: React.FC<OrgEditPageProps> = ({ onEditSuccess }) => {
         removeApItem={removeApItem}
         error={error}
         loading={loading}
+        conversionDate={conversionDate}
+        setConversionDate={setConversionDate}
+        taxYearEndMonth={taxYearEndMonth}
+        setTaxYearEndMonth={setTaxYearEndMonth}
         isEdit={true}
         orgId={orgId}
         nzbn={nzbn}

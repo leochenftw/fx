@@ -29,6 +29,7 @@ export interface Organisation {
   payroll_cycle?: 'weekly' | 'fortnightly' | 'monthly';
   categories?: string[];
   static_rules?: { pattern: string; category: string }[];
+  conversion_date?: string;
   opening_balances?: {
     bank_balances?: Record<string, BankOpeningDetail>;
     ar_balances?: Record<string, number>;

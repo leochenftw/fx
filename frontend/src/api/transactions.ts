@@ -43,5 +43,29 @@ export const transactionApi = {
       if (q) query = `?${q}`;
     }
     return api.get<{ transactions: any[] }>(`orgs/${orgId}/transactions${query}`);
-  }
+  },
+
+  /**
+   * Fetch transactions globally across all organisations via table scan, paginated.
+   */
+  listGlobal: (params?: { limit?: number; exclusive_start_key?: string }) => {
+    let query = '';
+    if (params) {
+      const q = new URLSearchParams(params as any).toString();
+      if (q) query = `?${q}`;
+    }
+    return api.get<{ transactions: any[]; last_evaluated_key?: string }>(`transactions${query}`);
+  },
+
+  /**
+   * Update a specific transaction details.
+   */
+  update: (orgId: string, date: string, txId: string, payload: Partial<CreateTransactionPayload>) =>
+    api.put<any>(`orgs/${orgId}/transactions/${date}/${txId}`, payload),
+
+  /**
+   * Delete a specific transaction.
+   */
+  delete: (orgId: string, date: string, txId: string) =>
+    api.delete<any>(`orgs/${orgId}/transactions/${date}/${txId}`)
 };

@@ -13,6 +13,8 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
   const [gstPeriod, setGstPeriod] = useState('2_months');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [conversionDate, setConversionDate] = useState('2026-04-01');
+  const [taxYearEndMonth, setTaxYearEndMonth] = useState<number>(3);
 
   // Bank Accounts Opening Balances state
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([
@@ -20,8 +22,7 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
       account_name: '',
       account_number: '',
       bank_name: '',
-      balance: undefined,
-      conversion_date: '2026-04-01',
+      balance: 0,
     },
   ]);
 
@@ -33,7 +34,7 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
   const addBankAccount = () => {
     setBankAccounts([
       ...bankAccounts,
-      { account_name: '', account_number: '', bank_name: '', balance: undefined, conversion_date: '2026-04-01' },
+      { account_name: '', account_number: '', bank_name: '', balance: 0 },
     ]);
   };
 
@@ -100,10 +101,10 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
 
     const bank_balances: Record<string, BankOpeningDetail> = {};
     const accountsInfo = bankAccounts.map((acc) => {
-      if (acc.account_number && acc.balance !== undefined && acc.conversion_date) {
+      if (acc.account_number && acc.balance !== undefined) {
         bank_balances[acc.account_number] = {
           balance: Number(acc.balance),
-          conversion_date: acc.conversion_date,
+          conversion_date: conversionDate,
         };
       }
 
@@ -150,6 +151,8 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
       gst_basis: gstRegistered ? gstBasis : undefined,
       gst_period: gstRegistered ? gstPeriod : undefined,
       bank_accounts: accountsInfo,
+      conversion_date: conversionDate,
+      tax_year_end_month: taxYearEndMonth,
       opening_balances: {
         bank_balances,
         ar_balances,
@@ -210,6 +213,10 @@ export const SetupPage: React.FC<SetupPageProps> = ({ onSetupSuccess }) => {
       removeApItem={removeApItem}
       error={error}
       loading={loading}
+      conversionDate={conversionDate}
+      setConversionDate={setConversionDate}
+      taxYearEndMonth={taxYearEndMonth}
+      setTaxYearEndMonth={setTaxYearEndMonth}
     />
   );
 };

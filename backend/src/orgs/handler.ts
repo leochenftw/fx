@@ -65,6 +65,7 @@ interface OrgMetadata {
     pattern: string;
     category: string;
   }[];
+  conversion_date?: string;
 }
 
 interface BankOpeningDetail {
@@ -382,6 +383,7 @@ export async function handler(event: {
         gst_period: payload.gst_period,
         tax_year_end_month: payload.tax_year_end_month ?? 3,
         bank_accounts: payload.bank_accounts ?? [],
+        conversion_date: payload.conversion_date || '2026-04-01',
         created_at: new Date().toISOString(),
       };
 
@@ -402,8 +404,8 @@ export async function handler(event: {
       // ── 2. 写入银行账户期初余额与账户专属基准日 ──
       if (openings.bank_balances) {
         for (const [accNum, detail] of Object.entries(openings.bank_balances)) {
-          // 每个账户独立校验自己的 conversion_date
-          if (!detail.conversion_date) {
+          const convDate = detail.conversion_date || payload.conversion_date;
+          if (!convDate) {
             return json(400, { error: `conversion_date is required for bank account: ${accNum}` });
           }
 
@@ -414,7 +416,7 @@ export async function handler(event: {
               sk: `OPENING#BANK#${accNum}`,
               account_number: accNum,
               balance: detail.balance,
-              conversion_date: detail.conversion_date, // 基准日落库至各账户中
+              conversion_date: convDate, // 基准日落库至各账户中
               updated_at: new Date().toISOString()
             }
           }));
@@ -1262,16 +1264,17 @@ export async function handler(event: {
 
       const orgPk = `ORG#${orgId}`;
 
-      // Retrieve existing METADATA record to allow partial (patch-like) updates
-      const existingRes = await ddb.send(new GetCommand({
+      // Retrieve all existing records for this organization to handle deletions
+      const existingRes = await ddb.send(new QueryCommand({
         TableName: TABLE_NAME,
-        Key: {
-          pk: orgPk,
-          sk: 'METADATA'
+        KeyConditionExpression: 'pk = :pk',
+        ExpressionAttributeValues: {
+          ':pk': orgPk
         }
       }));
 
-      const existingItem = existingRes.Item || {};
+      const existingItems = existingRes.Items || [];
+      const existingItem = existingItems.find(item => item.sk === 'METADATA') || {};
 
       const name = payload.name !== undefined ? payload.name : existingItem.name;
       const entity_type = payload.entity_type !== undefined ? payload.entity_type : existingItem.entity_type;
@@ -1298,17 +1301,29 @@ export async function handler(event: {
         nzbn: payload.nzbn !== undefined ? payload.nzbn : existingItem.nzbn,
         address: payload.address !== undefined ? payload.address : existingItem.address,
         payroll_cycle: payload.payroll_cycle !== undefined ? payload.payroll_cycle : existingItem.payroll_cycle,
+        conversion_date: payload.conversion_date !== undefined ? payload.conversion_date : (existingItem.conversion_date || '2026-04-01'),
         updated_at: new Date().toISOString(),
       };
 
       await ddb.send(new PutCommand({ TableName: TABLE_NAME, Item: metadataItem }));
 
-      // 2. 更新银行账户期初余额与账户专属基准日
+      // 2. 更新银行账户期初余额与账户专属基准日，并清理被删除的账户余额
       if (openings.bank_balances) {
-        for (const [accNum, detail] of Object.entries(openings.bank_balances)) {
-          if (!detail.conversion_date) {
-            return json(400, { error: `conversion_date is required for bank account: ${accNum}` });
+        // 清理被删除的银行账户余额记录
+        const existingBankAccs = existingItems.filter(item => item.sk.startsWith('OPENING#BANK#'));
+        for (const item of existingBankAccs) {
+          const accNum = item.sk.substring('OPENING#BANK#'.length);
+          if (!openings.bank_balances[accNum]) {
+            await ddb.send(new DeleteCommand({
+              TableName: TABLE_NAME,
+              Key: { pk: orgPk, sk: item.sk }
+            }));
           }
+        }
+
+        // 保存/更新当前银行账户余额
+        for (const [accNum, detail] of Object.entries(openings.bank_balances)) {
+          const convDate = detail.conversion_date || payload.conversion_date || metadataItem.conversion_date;
 
           await ddb.send(new PutCommand({
             TableName: TABLE_NAME,
@@ -1317,15 +1332,28 @@ export async function handler(event: {
               sk: `OPENING#BANK#${accNum}`,
               account_number: accNum,
               balance: detail.balance,
-              conversion_date: detail.conversion_date,
+              conversion_date: convDate,
               updated_at: new Date().toISOString()
             }
           }));
         }
       }
 
-      // 3. 更新应收账款期初
+      // 3. 更新应收账款期初，并清理被删除的AR记录
       if (openings.ar_balances) {
+        // 清理被删除的AR记录
+        const existingArItems = existingItems.filter(item => item.sk.startsWith('OPENING#AR#'));
+        for (const item of existingArItems) {
+          const customerName = item.sk.substring('OPENING#AR#'.length);
+          if (openings.ar_balances[customerName] === undefined) {
+            await ddb.send(new DeleteCommand({
+              TableName: TABLE_NAME,
+              Key: { pk: orgPk, sk: item.sk }
+            }));
+          }
+        }
+
+        // 保存/更新当前应收记录
         for (const [customerName, amount] of Object.entries(openings.ar_balances)) {
           await ddb.send(new PutCommand({
             TableName: TABLE_NAME,
@@ -1340,8 +1368,21 @@ export async function handler(event: {
         }
       }
 
-      // 4. 更新应付账款期初
+      // 4. 更新应付账款期初，并清理被删除的AP记录
       if (openings.ap_balances) {
+        // 清理被删除的AP记录
+        const existingApItems = existingItems.filter(item => item.sk.startsWith('OPENING#AP#'));
+        for (const item of existingApItems) {
+          const vendorName = item.sk.substring('OPENING#AP#'.length);
+          if (openings.ap_balances[vendorName] === undefined) {
+            await ddb.send(new DeleteCommand({
+              TableName: TABLE_NAME,
+              Key: { pk: orgPk, sk: item.sk }
+            }));
+          }
+        }
+
+        // 保存/更新当前应付记录
         for (const [vendorName, amount] of Object.entries(openings.ap_balances)) {
           await ddb.send(new PutCommand({
             TableName: TABLE_NAME,
@@ -1480,7 +1521,8 @@ export async function handler(event: {
           'Entertainment', 'Insurance', 'Motor Vehicle Expenses', 'Office Supplies & Post',
           'Rent & Lease', 'Repairs & Maintenance', 'Software & IT Services',
           'Subscriptions & Memberships', 'Travel & Accommodation', 'Utilities & Comm',
-          'Wages & Salaries', 'Sales & Revenue', 'Other Income', 'Cost of Goods Sold'
+          'Wages & Salaries', 'Sales & Revenue', 'Other Income', 'Cost of Goods Sold',
+          'Taxes', 'Transfer'
         ];
       }
 
@@ -1492,11 +1534,12 @@ export async function handler(event: {
         '',
         'Rules:',
         '1. Use ONLY categories from the list above. Never invent new categories.',
-        '2. If the vendor name looks like a bank account number (e.g. "01-0505-0780727-00"), a credit card number (e.g. "9554-****-****-1524"), or a fund transfer description (e.g. "To: 88890388-1001"), classify it as "Bank Fees & Interest".',
+        '2. If the vendor name looks like a bank account number (e.g. "01-0505-0780727-00"), a credit card number (e.g. "9554-****-****-1524"), or a fund transfer description (e.g. "To: 88890388-1001" or contains "Transfer"), classify it as "Transfer".',
         '3. NZ-specific: Spark = "Utilities & Comm", Vodafone = "Utilities & Comm", Contact Energy = "Utilities & Comm", ANZ/BNZ/ASB/Westpac fees = "Bank Fees & Interest", Southern Cross = "Insurance", AA Insurance = "Insurance", Kindo = "Office Supplies & Post", Snapper = "Travel & Accommodation".',
         '4. Supermarkets, Asian supermarkets, restaurants, food suppliers = "Cost of Goods Sold".',
         '5. If genuinely uncertain, prefer "Consulting & Professional" over "Other Income".',
-        '6. Return ONLY a valid JSON object. No markdown code fences, no explanation.',
+        '6. NZ-specific: Inland Revenue, IRD, tax payments, GST payments, PAYE payments = "Taxes".',
+        '7. Return ONLY a valid JSON object. No markdown code fences, no explanation.',
         '',
         'Vendors to categorise:',
         JSON.stringify(vendors),
@@ -1551,6 +1594,68 @@ export async function handler(event: {
     }
 
     // ── Transactions API Routes ───────────────────────────────────────
+
+    // GET /transactions (Global Scan of all transactions across all organisations, paginated 50 items per batch)
+    if (path === '/transactions') {
+      if (method === 'GET') {
+        const qs = event.queryStringParameters || {};
+        const limit = qs.limit ? parseInt(qs.limit) : 50;
+        const exclusiveStartKey = qs.exclusive_start_key
+          ? JSON.parse(Buffer.from(qs.exclusive_start_key, 'base64').toString('utf8'))
+          : undefined;
+
+        // 🚨 安全哨兵：查询当前用户加入的全部组织
+        const userOrgsRes = await ddb.send(new QueryCommand({
+          TableName: TABLE_NAME,
+          KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk_prefix)',
+          ExpressionAttributeValues: {
+            ':pk': `USER#${userId}`,
+            ':sk_prefix': 'ORG#',
+          },
+        }));
+
+        const allowedOrgIds = (userOrgsRes.Items || []).map(item => item.sk.substring('ORG#'.length));
+        if (allowedOrgIds.length === 0) {
+          return json(200, { transactions: [], last_evaluated_key: undefined });
+        }
+
+        // 动态构造 FilterExpression 以保障数据多租户隔离与安全性
+        const expressionAttributeValues: Record<string, any> = {
+          ':prefix': 'TX#',
+        };
+        const inConditions: string[] = [];
+        allowedOrgIds.forEach((orgId, idx) => {
+          const varName = `:orgPk${idx}`;
+          expressionAttributeValues[varName] = `ORG#${orgId}`;
+          inConditions.push(varName);
+        });
+
+        const scanParams: any = {
+          TableName: TABLE_NAME,
+          FilterExpression: `begins_with(sk, :prefix) AND pk IN (${inConditions.join(', ')})`,
+          ExpressionAttributeValues: expressionAttributeValues,
+          Limit: limit,
+        };
+        if (exclusiveStartKey) {
+          scanParams.ExclusiveStartKey = exclusiveStartKey;
+        }
+
+        const scanResult = await ddb.send(new ScanCommand(scanParams));
+
+        const txs = (scanResult.Items || []).map(({ pk, sk, ...rest }) => ({
+          ...rest,
+          pk,
+          sk,
+          org_id: pk.substring('ORG#'.length)
+        }));
+
+        const lastEvaluatedKey = scanResult.LastEvaluatedKey
+          ? Buffer.from(JSON.stringify(scanResult.LastEvaluatedKey)).toString('base64')
+          : undefined;
+
+        return json(200, { transactions: txs, last_evaluated_key: lastEvaluatedKey });
+      }
+    }
 
     // POST & GET /orgs/:org_id/transactions
     const txListMatch = path.match(/^\/orgs\/([a-f0-9-]+)\/transactions$/);

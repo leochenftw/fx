@@ -275,6 +275,7 @@ export async function listTransactions(
     TableName: TABLE_NAME,
     KeyConditionExpression: keyCondition,
     ExpressionAttributeValues: expressionAttributeValues,
+    ScanIndexForward: false,
   }));
 
   let transactions = Items.map(({ pk, sk, ...rest }) => rest as Transaction);

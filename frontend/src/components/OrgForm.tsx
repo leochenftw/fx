@@ -42,6 +42,10 @@ export const OrgForm: React.FC<OrgFormProps> = ({
   setAddress,
   payrollCycle = 'weekly',
   setPayrollCycle,
+  conversionDate = '2026-04-01',
+  setConversionDate,
+  taxYearEndMonth = 3,
+  setTaxYearEndMonth,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -89,7 +93,7 @@ export const OrgForm: React.FC<OrgFormProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <div>
               <label className="block font-bold text-slate-600 mb-1.5">{t('setup.entity_type_label')}</label>
               <select
@@ -114,6 +118,37 @@ export const OrgForm: React.FC<OrgFormProps> = ({
                 onChange={(e) => setIrdNumber(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-900 font-mono font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition"
               />
+            </div>
+            <div>
+              <label className="block font-bold text-slate-600 mb-1.5">{t('setup.conversion_date_label', 'Conversion Date')}</label>
+              <input
+                type="date"
+                required
+                value={conversionDate}
+                onChange={(e) => setConversionDate && setConversionDate(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-900 font-mono font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition"
+              />
+            </div>
+            <div>
+              <label className="block font-bold text-slate-600 mb-1.5">Financial Year End (FYE)</label>
+              <select
+                value={taxYearEndMonth}
+                onChange={(e) => setTaxYearEndMonth && setTaxYearEndMonth(Number(e.target.value))}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition"
+              >
+                <option value={1}>January</option>
+                <option value={2}>February</option>
+                <option value={3}>March (NZ Standard)</option>
+                <option value={4}>April</option>
+                <option value={5}>May</option>
+                <option value={6}>June (AU Standard)</option>
+                <option value={7}>July</option>
+                <option value={8}>August</option>
+                <option value={9}>September</option>
+                <option value={10}>October</option>
+                <option value={11}>November</option>
+                <option value={12}>December (US/UK)</option>
+              </select>
             </div>
           </div>
 
@@ -239,9 +274,9 @@ export const OrgForm: React.FC<OrgFormProps> = ({
           {bankAccounts.map((acc, index) => (
             <div
               key={index}
-              className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-center text-xs"
+              className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-end text-xs"
             >
-              <div>
+              <div className="md:col-span-4">
                 <label className="block font-bold text-slate-500 mb-1">{t('setup.account_name_label')}</label>
                 <input
                   type="text"
@@ -252,7 +287,7 @@ export const OrgForm: React.FC<OrgFormProps> = ({
                   className="w-full bg-white border border-slate-200 font-semibold rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
-              <div>
+              <div className="md:col-span-4">
                 <label className="block font-bold text-slate-500 mb-1">{t('setup.account_number_label')}</label>
                 <div className="relative">
                   <input
@@ -266,7 +301,7 @@ export const OrgForm: React.FC<OrgFormProps> = ({
                   <span className="material-icons absolute right-3 top-2.5 text-slate-300 text-lg">account_balance</span>
                 </div>
               </div>
-              <div>
+              <div className="md:col-span-3">
                 <label className="block font-bold text-slate-500 mb-1">{t('setup.balance_label')}</label>
                 <input
                   type="number"
@@ -278,27 +313,17 @@ export const OrgForm: React.FC<OrgFormProps> = ({
                   className="w-full bg-white border border-slate-200 font-bold rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
-              <div>
-                <label className="block font-bold text-slate-500 mb-1">{t('setup.conversion_date_label')}</label>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="date"
-                    required
-                    value={acc.conversion_date}
-                    onChange={(e) => updateBankAccount(index, 'conversion_date', e.target.value)}
-                    className="flex-grow bg-white border border-slate-200 font-mono rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                  {bankAccounts.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeBankAccount(index)}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition cursor-pointer"
-                      title={t('setup.remove_account_title') || undefined}
-                    >
-                      <span className="material-icons text-[16px] leading-none">delete</span>
-                    </button>
-                  )}
-                </div>
+              <div className="md:col-span-1 flex justify-center">
+                {bankAccounts.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeBankAccount(index)}
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition cursor-pointer"
+                    title={t('setup.remove_account_title') || undefined}
+                  >
+                    <span className="material-icons text-[16px] leading-none">delete</span>
+                  </button>
+                )}
               </div>
             </div>
           ))}

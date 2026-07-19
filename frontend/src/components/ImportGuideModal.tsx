@@ -330,6 +330,8 @@ export const ImportGuideModal: React.FC<ImportGuideModalProps> = ({
 
       // 3. Map to standard transaction entities
       const mappedTransactions: any[] = [];
+      const typeHeader = csvHeaders.find(h => h.toLowerCase().trim() === 'type');
+
       for (const row of rawRows) {
         const rawDate = row[dateColumn] || '';
         const rawAmount = row[amountColumn] || '';
@@ -383,6 +385,79 @@ export const ImportGuideModal: React.FC<ImportGuideModalProps> = ({
           .filter(Boolean)
           .join('#');
 
+        // Smart Category Pre-Matching based on CSV Type column values & Payee/Description content
+        let category = 'Uncategorized';
+        const cleanVendor = rawVendor.trim().toLowerCase();
+        const cleanDesc = description.trim().toLowerCase();
+
+        // 1. First check CSV Type column (prioritize if it's NOT a credit card OR explicitly matched)
+        if (typeHeader) {
+          const rawType = (row[typeHeader] || '').trim().toLowerCase();
+          if (!isCredit) {
+            // Debit Card Type column mapping
+            if (rawType === 'transfer') {
+              category = 'Transfer';
+            } else if (rawType === 'tax payment' || rawType === 'tax') {
+              category = 'Taxes';
+            } else if (rawType === 'bank fee' || rawType === 'fee') {
+              category = 'Bank Fees & Interest';
+            } else if (rawType === 'wages' || rawType === 'salary') {
+              category = 'Wages & Salaries';
+            }
+          } else {
+            // Credit Card Type column is D/C, only map if it explicitly says 'transfer'
+            if (rawType === 'transfer') {
+              category = 'Transfer';
+            }
+          }
+        }
+
+        // 2. Fallback to Vendor name & Description text analysis (highly effective for credit cards and generic payees)
+        if (category === 'Uncategorized') {
+          // Check for Inland Revenue / IRD / Tax payments
+          if (
+            cleanVendor.includes('inland revenue') ||
+            cleanVendor.includes('ird ') ||
+            cleanVendor === 'ird' ||
+            cleanDesc.includes('inland revenue') ||
+            cleanDesc.includes('tax payment') ||
+            cleanDesc.includes('ird ')
+          ) {
+            category = 'Taxes';
+          }
+          // Check for Transfers (bank account number format or "transfer" keyword)
+          else if (
+            cleanVendor.includes('transfer') ||
+            cleanDesc.includes('transfer') ||
+            /\b\d{2}-\d{4}-\d{7,8}-\d{2,3}\b/.test(cleanVendor) || // NZ Bank Account format
+            /\b\d{2}-\d{4}-\d{7,8}-\d{2,3}\b/.test(cleanDesc) ||
+            /\b\d{4}-\*+-\*+-\d{4}\b/.test(cleanVendor) ||       // Card mask 1
+            /\b\d{4}-\*+-\*+-\d{4}\b/.test(cleanDesc)
+          ) {
+            category = 'Transfer';
+          }
+          // Check for Bank Fees & Interest
+          else if (
+            cleanVendor.includes('monthly a/c fee') ||
+            cleanVendor.includes('bank fee') ||
+            cleanVendor.includes('interest') ||
+            cleanDesc.includes('monthly a/c fee') ||
+            cleanDesc.includes('bank fee') ||
+            cleanDesc.includes('interest')
+          ) {
+            category = 'Bank Fees & Interest';
+          }
+          // Check for Wages & Salaries
+          else if (
+            cleanVendor.includes('wage') ||
+            cleanVendor.includes('salary') ||
+            cleanDesc.includes('wage') ||
+            cleanDesc.includes('salary')
+          ) {
+            category = 'Wages & Salaries';
+          }
+        }
+
         mappedTransactions.push({
           date: rawDate.trim(),
           vendor: rawVendor.trim(),
@@ -391,7 +466,8 @@ export const ImportGuideModal: React.FC<ImportGuideModalProps> = ({
           type: txType,
           rawHashString,
           hash: '',
-          isDuplicate: false
+          isDuplicate: false,
+          category
         });
       }
 
