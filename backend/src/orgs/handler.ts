@@ -1400,6 +1400,65 @@ export async function handler(event: {
       return json(200, { message: "Organisation and opening balances updated successfully." });
     }
 
+    // GET /entities/mapping — 获取增量比对商户对账映射配置
+    if (path === '/entities/mapping' && method === 'GET') {
+      const qs = event.queryStringParameters || {};
+      const clientVersion = qs.version || '';
+
+      // 1. 查询唯一存在的最新记录
+      const latestQuery = await ddb.send(new QueryCommand({
+        TableName: FOREIGN_ENTITIES_TABLE_NAME,
+        KeyConditionExpression: 'entity_type = :pk',
+        ExpressionAttributeValues: {
+          ':pk': 'GLOBAL#CONFIG'
+        }
+      }));
+
+      const latestItem = latestQuery.Items?.[0];
+
+      if (!latestItem) {
+        // 自愈分支：全表扫描现存 Supplier 和 Customer 实体，并生成极简映射写入新版本
+        console.log('[Self-Healing] GLOBAL#CONFIG not found. Scanning database to self-heal...');
+        const scanRes = await ddb.send(new ScanCommand({ TableName: FOREIGN_ENTITIES_TABLE_NAME }));
+        const rawEntities = scanRes.Items || [];
+        const consolidated = rawEntities
+          .filter(e => e.entity_type === 'Supplier' || e.entity_type === 'Customer')
+          .map(e => ({
+            entity_name: String(e.entity_name || '').trim(),
+            default_category: String(e.default_category || '').trim()
+          }))
+          .filter(e => e.entity_name && e.default_category);
+
+        const selfHealedVersion = String(Date.now());
+        await ddb.send(new PutCommand({
+          TableName: FOREIGN_ENTITIES_TABLE_NAME,
+          Item: {
+            entity_type: 'GLOBAL#CONFIG',
+            entity_id: selfHealedVersion,
+            entities: consolidated,
+            created_at: new Date().toISOString()
+          }
+        }));
+
+        // 如果客户端不带版本参数（无缓存），直接下发完整的映射列表供前端构建本地 IndexedDB
+        // 如果带了版本参数，说明是由于云端为空触发的自愈，此时前端版本即是 selfHealedVersion，返回空数组即可
+        return json(200, {
+          version: selfHealedVersion,
+          entities: clientVersion ? [] : consolidated
+        });
+      }
+
+      const serverVersion = latestItem.entity_id;
+      const entitiesList = latestItem.entities || [];
+
+      // 如果客户端不带版本（无缓存），或者服务端最新版本大于客户端当前版本，返回最新的全量实体数组以同步缓存
+      if (!clientVersion || Number(serverVersion) > Number(clientVersion)) {
+        return json(200, { version: serverVersion, entities: entitiesList });
+      } else {
+        return json(200, { version: serverVersion, entities: [] });
+      }
+    }
+
     // GET /entities/all — full scan, returns both Supplier and Customer
     if (path === '/entities/all' && method === 'GET') {
       const { Items = [] } = await ddb.send(
@@ -1436,7 +1495,7 @@ export async function handler(event: {
         const item = {
           entity_type: entityType,
           entity_id: entityId,
-          entity_name: String(payload.entity_name).trim(),
+          entity_name: String(payload.entity_name).trim().replace(/\s+/g, ' '),
           default_category: String(payload.default_category).trim(),
           ird_number: String(payload.ird_number || '').trim(),
           created_at: now,
@@ -1446,6 +1505,10 @@ export async function handler(event: {
           TableName: FOREIGN_ENTITIES_TABLE_NAME,
           Item: item
         }));
+
+        // 增量同步缓存
+        await updateGlobalCacheBackend(item.entity_name, item.default_category);
+
         return json(201, item);
       }
     }
@@ -1461,11 +1524,22 @@ export async function handler(event: {
         if (!payload.entity_name || !payload.default_category) {
           return json(400, { error: 'entity_name and default_category are required' });
         }
+
+        // 获取原实体的名字用于内存中的重构比对
+        const existingEnt = await ddb.send(new GetCommand({
+          TableName: FOREIGN_ENTITIES_TABLE_NAME,
+          Key: {
+            entity_type: entityType,
+            entity_id: entityId
+          }
+        }));
+        const oldName = existingEnt.Item ? existingEnt.Item.entity_name : undefined;
+
         const now = new Date().toISOString();
         const item = {
           entity_type: entityType,
           entity_id: entityId,
-          entity_name: String(payload.entity_name).trim(),
+          entity_name: String(payload.entity_name).trim().replace(/\s+/g, ' '),
           default_category: String(payload.default_category).trim(),
           ird_number: String(payload.ird_number || '').trim(),
           created_at: payload.created_at || now,
@@ -1475,10 +1549,24 @@ export async function handler(event: {
           TableName: FOREIGN_ENTITIES_TABLE_NAME,
           Item: item
         }));
+
+        // 增量同步缓存
+        await updateGlobalCacheBackend(item.entity_name, item.default_category, oldName);
+
         return json(200, item);
       }
 
       if (method === 'DELETE') {
+        // 删除前先读取该项目获取其 entity_name
+        const existingEnt = await ddb.send(new GetCommand({
+          TableName: FOREIGN_ENTITIES_TABLE_NAME,
+          Key: {
+            entity_type: entityType,
+            entity_id: entityId
+          }
+        }));
+        const deleteName = existingEnt.Item ? existingEnt.Item.entity_name : undefined;
+
         await ddb.send(new DeleteCommand({
           TableName: FOREIGN_ENTITIES_TABLE_NAME,
           Key: {
@@ -1486,6 +1574,12 @@ export async function handler(event: {
             entity_id: entityId
           }
         }));
+
+        if (deleteName) {
+          // 从极简缓存中剔除删除项
+          await updateGlobalCacheBackend(deleteName, '', undefined, true);
+        }
+
         return json(200, { message: 'Entity deleted successfully' });
       }
     }
@@ -1744,7 +1838,7 @@ export async function handler(event: {
         // 强转并安全调用
         const tx = await updateTransaction(orgId, urlDate, txId, {
           ...payload,
-          gross_amount: Number(payload.gross_amount),
+          gross_amount: payload.gross_amount !== undefined ? Number(payload.gross_amount) : undefined,
           gst_amount: payload.gst_amount !== undefined ? Number(payload.gst_amount) : undefined
         });
         return json(200, tx);
@@ -1763,5 +1857,73 @@ export async function handler(event: {
     }
     const message = err instanceof Error ? err.message : 'Internal server error';
     return json(500, { error: message });
+  }
+}
+
+/**
+ * Incrementally updates the global configuration cache in backend with a new or modified entity category, advancing the version.
+ */
+async function updateGlobalCacheBackend(
+  entityName: string,
+  category: string,
+  oldName?: string,
+  isDelete: boolean = false
+): Promise<void> {
+  try {
+    // 1. Get current latest GLOBAL#CONFIG
+    const latestQuery = await ddb.send(new QueryCommand({
+      TableName: FOREIGN_ENTITIES_TABLE_NAME,
+      KeyConditionExpression: 'entity_type = :pk',
+      ExpressionAttributeValues: {
+        ':pk': 'GLOBAL#CONFIG'
+      }
+    }));
+
+    const latestItem = latestQuery.Items?.[0];
+    const oldVersion = latestItem ? latestItem.entity_id : undefined;
+    let entitiesArray = latestItem ? (latestItem.entities || []) : [];
+
+    const cleanName = entityName.trim().replace(/\s+/g, ' ');
+    const cleanCat = category.trim();
+
+    // 2. Perform memory edits
+    if (isDelete) {
+      entitiesArray = entitiesArray.filter((e: any) => e.entity_name.trim().replace(/\s+/g, ' ').toLowerCase() !== cleanName.toLowerCase());
+    } else {
+      if (oldName) {
+        const cleanOldName = oldName.trim().replace(/\s+/g, ' ');
+        entitiesArray = entitiesArray.filter((e: any) => e.entity_name.trim().replace(/\s+/g, ' ').toLowerCase() !== cleanOldName.toLowerCase());
+      }
+      entitiesArray = entitiesArray.filter((e: any) => e.entity_name.trim().replace(/\s+/g, ' ').toLowerCase() !== cleanName.toLowerCase());
+      entitiesArray.push({ entity_name: cleanName, default_category: cleanCat });
+    }
+
+    // 3. Write new version
+    const versionString = String(Date.now());
+    await ddb.send(new PutCommand({
+      TableName: FOREIGN_ENTITIES_TABLE_NAME,
+      Item: {
+        entity_type: 'GLOBAL#CONFIG',
+        entity_id: versionString,
+        entities: entitiesArray,
+        created_at: new Date().toISOString()
+      }
+    }));
+
+    // 4. Delete the old version record to prevent history bloat
+    if (oldVersion && oldVersion !== versionString) {
+      await ddb.send(new DeleteCommand({
+        TableName: FOREIGN_ENTITIES_TABLE_NAME,
+        Key: {
+          entity_type: 'GLOBAL#CONFIG',
+          entity_id: oldVersion
+        }
+      }));
+      console.log(`[Cache Sync Backend] Deleted old version record: ${oldVersion}`);
+    }
+
+    console.log(`[Cache Sync Backend] Updated global cache to version ${versionString} with entity "${cleanName}"`);
+  } catch (err) {
+    console.error('[Cache Sync Backend] Failed to update global cache:', err);
   }
 }

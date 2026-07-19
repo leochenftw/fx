@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { transactionApi } from '../api/transactions';
-import { saveFingerprints } from '../utils/indexeddb';
+import { saveFingerprints, getLocalEntityMap, getLocalEntityVersion, saveLocalEntityMap } from '../utils/indexeddb';
 import { orgApi } from '../api/orgs';
 import { TransactionTable } from './TransactionTable';
 
@@ -93,6 +93,7 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   const [aiUpdatingId, setAiUpdatingId] = useState<string | null>(null);
   const aiLoading = aiUpdatingId !== null;
   const [categories, setCategories] = useState<string[]>([]);
+  const [syncLoading, setSyncLoading] = useState<boolean>(false);
   const [aiConfirm, setAiConfirm] = useState<{
     isOpen: boolean;
     vendors: string[];
@@ -104,19 +105,63 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     if (!isOpen) return;
 
     const initializeTransactions = async () => {
+      setSyncLoading(true);
+      setImportError(null);
       try {
+        // 1. 获取工作流配置中的 categories 列表
         const configRes = await orgApi.getWorkflowConfig();
         const fetchedCats = configRes.categories || [];
         setCategories(fetchedCats.length > 0 ? fetchedCats : STANDARD_CATEGORIES);
 
-        // Apply initial matching (use the category mapped from CSV Type column if available, else default to Uncategorized)
-        const initial = transactions.map(tx => ({
-          ...tx,
-          category: tx.category || 'Uncategorized'
-        }));
+        // 2. 读取本地缓存的版本号和商户 mapping 字典
+        const localVersion = await getLocalEntityVersion(orgId);
+        let entityMap = await getLocalEntityMap(orgId);
+
+        // 3. 网络同步，检查版本号更新情况
+        try {
+          const syncRes = await orgApi.getEntityMapping(localVersion);
+          const serverVersion = syncRes.version;
+          const deltaEntities = syncRes.entities || [];
+
+          if (deltaEntities.length > 0) {
+            // 云端发生数据变动更新，覆盖并保存最新的映射配置
+            const updatedMap: Record<string, string> = {};
+            deltaEntities.forEach(ent => {
+              if (ent.entity_name && ent.default_category) {
+                updatedMap[ent.entity_name.trim().replace(/\s+/g, ' ').toLowerCase()] = ent.default_category.trim();
+              }
+            });
+            entityMap = updatedMap;
+            await saveLocalEntityMap(orgId, serverVersion, updatedMap);
+            console.log('[Cache Sync] Local IndexedDB map updated to version:', serverVersion);
+          } else {
+            // 云端无变动或一致，仅把本地版本号向前推进对齐
+            if (serverVersion !== localVersion) {
+              await saveLocalEntityMap(orgId, serverVersion, entityMap);
+            }
+          }
+        } catch (netErr) {
+          console.warn('[Cache Sync] Network sync query failed, falling back to local storage:', netErr);
+        }
+
+        // 4. 将极简缓存与 CSV 解析出来的流水的 category 进行匹配映射，如匹配上则预填
+        const initial = transactions.map(tx => {
+          let matchedCat = tx.category || 'Uncategorized';
+          if (matchedCat === 'Uncategorized') {
+            const cleanVendor = tx.vendor.trim().replace(/\s+/g, ' ').toLowerCase();
+            if (entityMap[cleanVendor]) {
+              matchedCat = entityMap[cleanVendor];
+            }
+          }
+          return {
+            ...tx,
+            category: matchedCat
+          };
+        });
+
         setPreviewTxs(initial);
 
-        // Sync selection
+        // 同步选中的行 ID
         const initialSelected = new Set<string>();
         transactions.forEach(tx => {
           if (!tx.isDuplicate) {
@@ -125,11 +170,13 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
         });
         setSelectedIds(initialSelected);
         setForceInsertIds(new Set());
-        setImportError(null);
         setImportedCount(0);
-      } catch (err) {
-        console.error('Failed to load organisation cached entities:', err);
+      } catch (err: any) {
+        console.error('Failed to initialize transactions mapping:', err);
+        setImportError(err.message || 'Failed to initialize transactions mapping.');
         setPreviewTxs(transactions.map(tx => ({ ...tx, category: 'Uncategorized' })));
+      } finally {
+        setSyncLoading(false);
       }
     };
 
@@ -417,8 +464,13 @@ export const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
         </div>
 
         {/* Content - Transactions Table */}
-        <div className="flex-grow overflow-auto">
-          {visibleTxs.length === 0 ? (
+        <div className="flex-grow overflow-auto relative">
+          {syncLoading ? (
+            <div className="absolute inset-0 bg-white flex flex-col items-center justify-center space-y-4">
+              <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+              <p className="text-xs font-bold text-slate-400">Syncing organization contact mapping...</p>
+            </div>
+          ) : visibleTxs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-2">
               <span className="material-icons text-4xl">rule</span>
               <span className="text-sm font-bold">No transactions left to review.</span>

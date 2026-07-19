@@ -1,6 +1,8 @@
 const DB_NAME = 'FxSovereignDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'imported_transactions';
+const ENTITY_LIST_STORE = 'entity_list';
+const ENTITY_VERSION_STORE = 'entity_version';
 
 export interface ImportedFingerprint {
   id: string; // Composite key: `${org_id}#${hash}`
@@ -19,14 +21,100 @@ export function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (db.objectStoreNames.contains(STORE_NAME)) {
-        db.deleteObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
-      db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(ENTITY_LIST_STORE)) {
+        db.createObjectStore(ENTITY_LIST_STORE, { keyPath: 'org_id' });
+      }
+      if (!db.objectStoreNames.contains(ENTITY_VERSION_STORE)) {
+        db.createObjectStore(ENTITY_VERSION_STORE, { keyPath: 'org_id' });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Gets the locally cached entity category mapping dictionary for an organisation.
+ */
+export async function getLocalEntityMap(orgId: string): Promise<Record<string, string>> {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    try {
+      const transaction = db.transaction(ENTITY_LIST_STORE, 'readonly');
+      const store = transaction.objectStore(ENTITY_LIST_STORE);
+      const request = store.get(orgId);
+
+      request.onsuccess = () => {
+        if (request.result && request.result.mapping) {
+          resolve(request.result.mapping);
+        } else {
+          resolve({});
+        }
+      };
+      request.onerror = () => {
+        resolve({});
+      };
+    } catch (e) {
+      resolve({});
+    }
+  });
+}
+
+/**
+ * Gets the locally cached version string for an organisation.
+ * If not found, falls back to generating a fresh timestamp version.
+ */
+export async function getLocalEntityVersion(orgId: string): Promise<string> {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    try {
+      const transaction = db.transaction(ENTITY_VERSION_STORE, 'readonly');
+      const store = transaction.objectStore(ENTITY_VERSION_STORE);
+      const request = store.get(orgId);
+
+      request.onsuccess = () => {
+        if (request.result && request.result.version) {
+          resolve(request.result.version);
+        } else {
+          resolve('');
+        }
+      };
+      request.onerror = () => {
+        resolve('');
+      };
+    } catch (e) {
+      resolve('');
+    }
+  });
+}
+
+/**
+ * Saves both the entity category mapping and the version string to the local database.
+ */
+export async function saveLocalEntityMap(
+  orgId: string,
+  version: string,
+  mapping: Record<string, string>
+): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    try {
+      const transaction = db.transaction([ENTITY_LIST_STORE, ENTITY_VERSION_STORE], 'readwrite');
+      const listStore = transaction.objectStore(ENTITY_LIST_STORE);
+      const versionStore = transaction.objectStore(ENTITY_VERSION_STORE);
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+
+      listStore.put({ org_id: orgId, mapping });
+      versionStore.put({ org_id: orgId, version });
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 

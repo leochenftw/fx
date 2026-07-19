@@ -62,6 +62,8 @@ export const orgApi = {
     api.put<unknown>('config/workflow', payload),
   getAllEntities: () =>
     api.get<{ entities: Array<{ entity_id: string; entity_type: 'Supplier' | 'Customer'; entity_name: string; default_category: string; ird_number?: string; created_at?: string }> }>('entities/all'),
+  getEntityMapping: (version: string) =>
+    api.get<{ version: string; entities: Array<{ entity_name: string; default_category: string }> }>(`entities/mapping?version=${version}`),
   createEntity: (entityType: 'Supplier' | 'Customer', payload: { entity_name: string; default_category: string; ird_number?: string }) =>
     api.post<any>(`entities/${entityType}`, payload),
   updateEntity: (entityType: 'Supplier' | 'Customer', entityId: string, payload: { entity_name: string; default_category: string; ird_number?: string; created_at?: string }) =>

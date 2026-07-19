@@ -1,6 +1,6 @@
 import { DynamoDBStreamEvent } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { randomUUID } from 'crypto';
 
@@ -12,15 +12,14 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
   console.log(`[Stream] Received stream event with ${event.Records.length} records.`);
 
   for (const record of event.Records) {
-    // We are only interested in new item insertions (INSERT events)
-    if (record.eventName !== 'INSERT') {
+    if (record.eventName !== 'INSERT' && record.eventName !== 'MODIFY') {
       continue;
     }
 
     try {
       const newImage = record.dynamodb?.NewImage;
       if (!newImage) {
-        console.log('[Stream] No NewImage payload found in INSERT record. Skipping.');
+        console.log(`[Stream] No NewImage payload found in ${record.eventName} record. Skipping.`);
         continue;
       }
 
@@ -32,6 +31,12 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
       const isAR = sk.startsWith('OPENING#AR#');
       const isAP = sk.startsWith('OPENING#AP#');
       const isTX = sk.startsWith('TX#');
+
+      // 安全限制：对于 MODIFY 事件只处理交易流水的分类变更，避免在期初余额更新时重复建联系人
+      if (record.eventName === 'MODIFY' && !isTX) {
+        console.log('[Stream] Skip MODIFY event for non-transaction record.');
+        continue;
+      }
 
       if (isAR || isAP) {
         // Extract org UUID (pk structure is ORG#<uuid> -> slice off first 4 characters)
@@ -77,7 +82,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
           continue;
         }
 
-        const cleanEntityName = rawEntityName.trim();
+        const cleanEntityName = rawEntityName.trim().replace(/\s+/g, ' ');
         const cleanCategory = category ? category.trim() : 'Uncategorized';
         const entityType = item.type === 'income' || cleanCategory === 'Sales & Revenue' || cleanCategory === 'Other Income' ? 'Customer' : 'Supplier';
 
@@ -116,6 +121,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
               },
             })
           );
+          await updateGlobalCache(cleanEntityName, cleanCategory);
         } else if (existingEntity.default_category !== cleanCategory && cleanCategory !== 'Uncategorized') {
           // 3. Exists but category changed: update default_category to keep mapping fresh
           console.log(`[Stream] Updating existing foreign entity "${cleanEntityName}" under "${entityType}" from "${existingEntity.default_category}" to "${cleanCategory}"`);
@@ -130,6 +136,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
               },
             })
           );
+          await updateGlobalCache(cleanEntityName, cleanCategory);
         }
       }
     } catch (err: any) {
@@ -138,3 +145,58 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
     }
   }
 };
+
+/**
+ * Incrementally updates the global configuration cache with a new or modified entity category, advancing the version.
+ */
+async function updateGlobalCache(entityName: string, category: string): Promise<void> {
+  try {
+    const cleanName = entityName.trim().replace(/\s+/g, ' ');
+    const cleanCat = category.trim();
+
+    // 1. Get current latest GLOBAL#CONFIG
+    const latestQuery = await ddb.send(new QueryCommand({
+      TableName: FOREIGN_ENTITIES_TABLE_NAME,
+      KeyConditionExpression: 'entity_type = :pk',
+      ExpressionAttributeValues: {
+        ':pk': 'GLOBAL#CONFIG'
+      }
+    }));
+
+    const latestItem = latestQuery.Items?.[0];
+    const oldVersion = latestItem ? latestItem.entity_id : undefined;
+    let entitiesArray = latestItem ? (latestItem.entities || []) : [];
+
+    // 2. Incrementally update array in memory
+    entitiesArray = entitiesArray.filter((e: any) => e.entity_name.trim().replace(/\s+/g, ' ').toLowerCase() !== cleanName.toLowerCase());
+    entitiesArray.push({ entity_name: cleanName, default_category: cleanCat });
+
+    // 3. Write new version record
+    const versionString = String(Date.now());
+    await ddb.send(new PutCommand({
+      TableName: FOREIGN_ENTITIES_TABLE_NAME,
+      Item: {
+        entity_type: 'GLOBAL#CONFIG',
+        entity_id: versionString,
+        entities: entitiesArray,
+        created_at: new Date().toISOString()
+      }
+    }));
+
+    // 4. Delete the old version record to prevent history bloat
+    if (oldVersion && oldVersion !== versionString) {
+      await ddb.send(new DeleteCommand({
+        TableName: FOREIGN_ENTITIES_TABLE_NAME,
+        Key: {
+          entity_type: 'GLOBAL#CONFIG',
+          entity_id: oldVersion
+        }
+      }));
+      console.log(`[Stream Cache Sync] Deleted old version record: ${oldVersion}`);
+    }
+
+    console.log(`[Stream Cache Sync] Successfully updated global cache to version ${versionString} with entity "${cleanName}"`);
+  } catch (err) {
+    console.error('[Stream Cache Sync] Failed to incrementally update global config version:', err);
+  }
+}

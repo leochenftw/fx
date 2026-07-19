@@ -336,9 +336,25 @@ export async function updateTransaction(
   orgId: string,
   oldDate: string,
   txId: string,
-  input: TransactionInput
+  input: Partial<TransactionInput>
 ): Promise<Transaction> {
-  const { date: newDate, vendor, description, type, gross_amount, gst_type, category, gst_amount: manualGst, receipt_s3_key, source = 'manual' } = input;
+  const oldTx = await getTransaction(orgId, oldDate, txId);
+
+  // 安全合并输入参数与既有属性
+  const mergedInput: TransactionInput = {
+    date: input.date !== undefined ? input.date : oldTx.date,
+    vendor: input.vendor !== undefined ? input.vendor : oldTx.vendor,
+    description: input.description !== undefined ? input.description : oldTx.description,
+    type: input.type !== undefined ? input.type : oldTx.type,
+    gross_amount: input.gross_amount !== undefined ? input.gross_amount : oldTx.gross_amount,
+    gst_type: input.gst_type !== undefined ? input.gst_type : oldTx.gst_type,
+    category: input.category !== undefined ? input.category : oldTx.category,
+    gst_amount: input.gst_amount !== undefined ? input.gst_amount : oldTx.gst_amount,
+    receipt_s3_key: input.receipt_s3_key !== undefined ? input.receipt_s3_key : oldTx.receipt_s3_key,
+    source: input.source !== undefined ? input.source : oldTx.source,
+  };
+
+  const { date: newDate, vendor, description, type, gross_amount, gst_type, category, gst_amount: manualGst, receipt_s3_key, source = 'manual' } = mergedInput;
 
   if (!newDate || !vendor || !type || gross_amount === undefined || !gst_type || !category) {
     throw new ServiceError(400, 'date, vendor, type, gross_amount, gst_type, and category are required.');
@@ -351,7 +367,6 @@ export async function updateTransaction(
   }
   validateGstType(type, gst_type);
 
-  const oldTx = await getTransaction(orgId, oldDate, txId);
   const cleanNewDate = newDate.substring(0, 10);
 
   let gstRate = 0;

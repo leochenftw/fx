@@ -260,32 +260,29 @@ export const TransactionsPage: React.FC = () => {
       </div>
 
       {/* Filters Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
+      <div className="sticky top-0 z-50 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          
+
           {/* Left Side: Type Tabs */}
           <div className="flex bg-slate-100 p-1 rounded-xl w-fit self-start">
             <button
               onClick={() => setFilterType('all')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition ${
-                filterType === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition ${filterType === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
             >
               All Flows
             </button>
             <button
               onClick={() => setFilterType('income')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition ${
-                filterType === 'income' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-600'
-              }`}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition ${filterType === 'income' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-600'
+                }`}
             >
               Inflow
             </button>
             <button
               onClick={() => setFilterType('expense')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition ${
-                filterType === 'expense' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition ${filterType === 'expense' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
             >
               Outflow
             </button>
@@ -374,7 +371,7 @@ export const TransactionsPage: React.FC = () => {
             />
           </div>
         )}
-        
+
         {/* Load More Button & Footer Row */}
         {!loading && !error && tableItems.length > 0 && (
           <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex-shrink-0 flex items-center justify-between">
