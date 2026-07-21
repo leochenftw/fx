@@ -17,3 +17,9 @@ export type {
 } from './modules/org';
 
 export type { StaffDetailsProps } from './modules/staff';
+
+export type {
+  BillsListTableProps,
+  ReceiptsListTableProps,
+  CreateBillModalProps,
+} from './modules/bills';

@@ -32,3 +32,13 @@ Monolithic and oversized `types.ts` files are forbidden. All TypeScript type def
 ## 4. Communication & Coding Rules
 - **Language Policy**: Frontend/backend user interfaces, buttons, application logs, and code comments must be written in **English**. Human-to-human communications, implementation plans, checklists/tasks, and walkthrough walkthroughs must be written in **Chinese**.
 - **Type Safety**: Any feature development or codebase refactoring must guarantee zero TypeScript compiler errors (`npm run build` and backend `tsc` must pass cleanly).
+
+---
+
+## 5. Commercial Deployment & Architecture Guidelines
+- **Business Deployment Model**: The system is designed for a **Managed Remote Deployment (远程代部署)** commercial model.
+- **Client Zero-Prerequisite Guarantee**: Clients/buyers are non-technical end users. They DO NOT need Node.js, AWS CLI, or local build environments.
+- **Remote Deployment Pipeline**: Deployments to client AWS accounts are performed remotely from the developer/operator's environment using client-provided AWS credentials (IAM Access Keys or Cross-Account IAM Roles).
+- **Automated Frontend Build & S3 Deploy via CDK**: During `cdk deploy`, CDK MUST automatically trigger frontend compilation (`npm run build`), dynamically inject backend resource endpoints (Lambda URL, UserPool ID, S3 Bucket names), and sync the compiled static bundle (`dist/`) into the target client S3 bucket via `s3deploy.BucketDeployment`. Clients receive a 100% ready-to-use application URL without manual frontend steps.
+- **Entry Point URL & Client Delivery**: Upon `cdk deploy` completion, CDK MUST export and print the final application entry URL (`AppUrl` via `CfnOutput` and `./scripts/post-deploy.js`). This entry URL is the primary deliverable provided to the client for immediate browser access.
+- **Tax Invoice Compliance & Archiving**: Original invoice attachments (PDFs/Images) uploaded via `/bills` must be archived permanently in private S3 buckets (`s3://.../orgs/{orgId}/bills/`) to satisfy NZ IRD / AU ATO 7-year tax audit compliance. Frontend previews utilize 15-minute S3 Presigned URLs.
