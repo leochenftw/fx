@@ -34,4 +34,5 @@ export type {
   PaymentMethod,
   BillsTabType,
   CreateBillModalProps,
+  UploadExpenseModalProps,
 } from './types/modules/bills';

@@ -34,6 +34,12 @@ import {
   AdminUserGlobalSignOutCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 
+import {
+  getPresignedUploadUrl,
+  parseDocumentFromS3,
+  createBillOrExpense,
+} from '../bills/service';
+
 // ── Cognito Verifier Initialization ─────────────
 const verifier = CognitoJwtVerifier.create({
   userPoolId: process.env.COGNITO_USER_POOL_ID || 'dummy-pool-id',
@@ -122,7 +128,7 @@ export async function handler(event: {
   }
 
   // ── 1.2 Org-Level Membership & RBAC Guard ──
-  const orgIdMatch = path.match(/^\/orgs\/([a-f0-9-]+)(?:\/|$)/);
+  const orgIdMatch = path.match(/^\/orgs\/([a-zA-Z0-9_-]+)(?:\/|$)/);
   let userRole: 'OWNER' | 'ADMIN' | 'STAFF' | undefined;
 
   if (orgIdMatch) {
@@ -248,6 +254,80 @@ export async function handler(event: {
       clearGstCache();
 
       return json(200, { message: 'GST config updated' });
+    }
+
+    // ── Bills & Expenses API Routes (Org Permission Guard Enforced) ──
+
+    // POST /orgs/:orgId/temp-upload-url — Request S3 Presigned Upload URL for Direct Raw Binary Upload
+    const presignMatch = path.match(/^\/orgs\/([a-zA-Z0-9_-]+)\/temp-upload-url$/);
+    if (method === 'POST' && presignMatch) {
+      const orgId = presignMatch[1];
+      const payload = JSON.parse(rawBody);
+      if (!payload.file_name) {
+        return json(400, { error: 'file_name is required' });
+      }
+
+      const mimeType = payload.mime_type || 'application/octet-stream';
+      const result = await getPresignedUploadUrl(orgId, payload.file_name, mimeType);
+      return json(200, result);
+    }
+
+    // POST /orgs/:orgId/bills/parse — AI Bedrock OCR scan for Invoice (S3 temp_s3_key based)
+    const parseBillMatch = path.match(/^\/orgs\/([a-zA-Z0-9_-]+)\/bills\/parse$/);
+    if (method === 'POST' && parseBillMatch) {
+      const orgId = parseBillMatch[1];
+      const payload = JSON.parse(rawBody);
+      if (!payload.temp_s3_key) {
+        return json(400, { error: 'temp_s3_key is required' });
+      }
+
+      const extractedData = await parseDocumentFromS3(orgId, payload.temp_s3_key, 'bill');
+      return json(200, {
+        temp_s3_key: payload.temp_s3_key,
+        extracted_data: extractedData,
+      });
+    }
+
+    // POST /orgs/:orgId/expenses/parse — AI Bedrock OCR scan for Receipt (S3 temp_s3_key based)
+    const parseExpenseMatch = path.match(/^\/orgs\/([a-zA-Z0-9_-]+)\/expenses\/parse$/);
+    if (method === 'POST' && parseExpenseMatch) {
+      const orgId = parseExpenseMatch[1];
+      const payload = JSON.parse(rawBody);
+      if (!payload.temp_s3_key) {
+        return json(400, { error: 'temp_s3_key is required' });
+      }
+
+      const extractedData = await parseDocumentFromS3(orgId, payload.temp_s3_key, 'expense');
+      return json(200, {
+        temp_s3_key: payload.temp_s3_key,
+        extracted_data: extractedData,
+      });
+    }
+
+    // POST /orgs/:orgId/bills — Finalize and Save Invoice Record
+    const createBillMatch = path.match(/^\/orgs\/([a-zA-Z0-9_-]+)\/bills$/);
+    if (method === 'POST' && createBillMatch) {
+      const orgId = createBillMatch[1];
+      const payload = JSON.parse(rawBody);
+      if (!payload.vendor_name) {
+        return json(400, { error: 'vendor_name is required' });
+      }
+
+      const savedItem = await createBillOrExpense(orgId, 'bill', payload, userId, payload.temp_s3_key);
+      return json(201, savedItem);
+    }
+
+    // POST /orgs/:orgId/expenses — Finalize and Save Expense Receipt Record
+    const createExpenseMatch = path.match(/^\/orgs\/([a-zA-Z0-9_-]+)\/expenses$/);
+    if (method === 'POST' && createExpenseMatch) {
+      const orgId = createExpenseMatch[1];
+      const payload = JSON.parse(rawBody);
+      if (!payload.merchant_name) {
+        return json(400, { error: 'merchant_name is required' });
+      }
+
+      const savedItem = await createBillOrExpense(orgId, 'expense', payload, userId, payload.temp_s3_key);
+      return json(201, savedItem);
     }
 
     // GET /config/mappings — Get all global CSV mappings

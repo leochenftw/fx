@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getValidToken } from '../App';
@@ -8,17 +8,12 @@ import type { StaffMember } from '../types';
 export const StaffListPage: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const activeOrgId = localStorage.getItem('active_org_id');
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchStaffList = async () => {
-    if (!activeOrgId) {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
@@ -47,13 +42,9 @@ export const StaffListPage: React.FC = () => {
     }
   };
 
-  const fetchedRef = useRef<string | null>(null);
-
   useEffect(() => {
-    if (fetchedRef.current === activeOrgId) return;
-    fetchedRef.current = activeOrgId;
     fetchStaffList();
-  }, [activeOrgId]);
+  }, []);
 
   const handleDelete = async (staffId: string, name: string) => {
     const confirmed = window.confirm(
@@ -80,26 +71,6 @@ export const StaffListPage: React.FC = () => {
       alert(err.message || 'Network error occurred during deletion.');
     }
   };
-
-  if (!activeOrgId) {
-    return (
-      <div className="flex flex-col justify-center items-center py-20 text-center space-y-4 max-w-[1280px]">
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 flex items-center space-x-3">
-          <span className="material-icons text-xl leading-none">warning</span>
-          <span className="text-xs font-black uppercase tracking-wider">Active Organisation Required</span>
-        </div>
-        <p className="text-sm text-slate-500 font-semibold max-w-md">
-          Please select or activate an organisation from the Organisations list first to configure its staff members.
-        </p>
-        <button
-          onClick={() => navigate('/orgs')}
-          className="text-xs font-black uppercase tracking-widest text-white bg-slate-900 hover:bg-slate-800 px-5 py-2.5 rounded-xl transition duration-150 shadow-md cursor-pointer"
-        >
-          Select Organisation
-        </button>
-      </div>
-    );
-  }
 
   if (loading) {
     return (

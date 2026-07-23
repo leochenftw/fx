@@ -7,7 +7,6 @@ import type { OrgListProps } from '../types';
 export const OrgList: React.FC<OrgListProps> = ({ orgs, loading, hasMore, onLoadMore, loadingMore }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const activeOrgId = localStorage.getItem('active_org_id');
 
   // Helper to extract initials (e.g. Acme Plumbing -> AP)
   const getInitials = (name: string): string => {
@@ -122,7 +121,6 @@ export const OrgList: React.FC<OrgListProps> = ({ orgs, loading, hasMore, onLoad
       {/* Orgs List Container */}
       <div className="space-y-4">
         {orgs.map((org) => {
-          const isActive = activeOrgId === org.id;
           const initials = getInitials(org.name);
           const theme = getEntityTheme(org.entity_type);
 
@@ -169,8 +167,7 @@ export const OrgList: React.FC<OrgListProps> = ({ orgs, loading, hasMore, onLoad
             <div
               key={org.id}
               onClick={() => navigate(`/orgs/${org.id}`)}
-              className={`bg-white border rounded-2xl p-6 shadow-sm transition duration-200 hover:shadow-md org-card group cursor-pointer ${isActive ? 'border-emerald-500 ring-1 ring-emerald-500/20' : 'border-slate-200 hover:border-slate-300'
-                }`}
+              className="bg-white border rounded-2xl p-6 shadow-sm transition duration-200 hover:shadow-md org-card group cursor-pointer border-slate-200 hover:border-slate-300"
             >
               {/* Left Side: Avatar Initials + Details */}
               <div className="flex items-start space-x-4">
@@ -189,12 +186,6 @@ export const OrgList: React.FC<OrgListProps> = ({ orgs, loading, hasMore, onLoad
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${theme.labelBg}`}>
                       {theme.label}
                     </span>
-                    {isActive && (
-                      <span className="bg-emerald-100 text-emerald-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                        <span className="material-icons text-[11px] leading-none">check_circle</span>
-                        <span>Active</span>
-                      </span>
-                    )}
                   </div>
 
                   {/* NZ Business Context Tags */}
@@ -235,12 +226,7 @@ export const OrgList: React.FC<OrgListProps> = ({ orgs, loading, hasMore, onLoad
                   </span>
                 </div>
 
-                <span
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-200 flex items-center space-x-1 ${isActive
-                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-100'
-                    : 'bg-emerald-50 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white'
-                    }`}
-                >
+                <span className="px-4 py-2 rounded-xl text-xs font-bold transition duration-200 flex items-center space-x-1 bg-emerald-50 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white">
                   <span>Launch</span>
                   <i className="material-icons text-[12px] opacity-70 group-hover:translate-x-0.5 transition-transform duration-200 leading-none">
                     chevron_right

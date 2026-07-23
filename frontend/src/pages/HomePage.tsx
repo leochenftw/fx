@@ -4,7 +4,6 @@ import type { HomePageProps } from '../types';
 
 export const HomePage: React.FC<HomePageProps> = ({ orgs = [] }) => {
   const { t } = useTranslation();
-  const activeOrgId = localStorage.getItem('active_org_id');
   const widgetsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,8 +24,8 @@ export const HomePage: React.FC<HomePageProps> = ({ orgs = [] }) => {
     };
   }, []);
 
-  // ── Find current active organisation detail ──
-  const activeOrg = orgs.find(o => o.id === activeOrgId);
+  // ── Find primary organisation detail ──
+  const activeOrg = orgs[0];
 
   // ── Compute bank balance card data with live linkage & fallback ──
   let displayBankName = 'ANZ';

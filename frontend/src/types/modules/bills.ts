@@ -5,6 +5,7 @@ export type BillsTabType = 'bills' | 'expenses';
 
 export interface BillItem {
   id: string;
+  org_id?: string;
   bill_number: string;
   vendor_name: string;
   issue_date: string;
@@ -17,10 +18,12 @@ export interface BillItem {
   category: string;
   description: string;
   attachment_url?: string;
+  temp_s3_key?: string;
 }
 
 export interface ReceiptItem {
   id: string;
+  org_id?: string;
   receipt_number?: string;
   merchant_name: string;
   purchase_date: string;
@@ -33,6 +36,7 @@ export interface ReceiptItem {
   status: ReceiptStatus;
   notes?: string;
   image_url?: string;
+  temp_s3_key?: string;
 }
 
 export interface BillsListTableProps {
@@ -54,4 +58,14 @@ export interface CreateBillModalProps {
   onClose: () => void;
   onSubmit: (newBill: Omit<BillItem, 'id'>) => void;
   categories?: string[];
+  organisations?: Array<{ id: string; name: string }>;
+}
+
+export interface UploadExpenseModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (newExpense: Omit<ReceiptItem, 'id'>) => void;
+  categories?: string[];
+  staffMembers?: string[];
+  organisations?: Array<{ id: string; name: string }>;
 }

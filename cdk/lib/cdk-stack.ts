@@ -43,6 +43,33 @@ export class CdkStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
+      cors: [
+        {
+          allowedMethods: [
+            s3.HttpMethods.GET,
+            s3.HttpMethods.PUT,
+            s3.HttpMethods.POST,
+            s3.HttpMethods.HEAD,
+            s3.HttpMethods.DELETE,
+          ],
+          allowedOrigins: [
+            'http://localhost:5173',
+            'http://localhost:3000',
+            'http://localhost:4173',
+            'http://127.0.0.1:5173',
+            ...(process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : []),
+          ],
+          allowedHeaders: ['*'],
+          exposedHeaders: ['ETag'],
+        },
+      ],
+      lifecycleRules: [
+        {
+          id: 'ExpireTempAttachments',
+          prefix: 'temp_attachments/',
+          expiration: cdk.Duration.days(1),
+        },
+      ],
     });
 
     // ──────────────────────────────────────────────
@@ -135,10 +162,10 @@ export class CdkStack extends cdk.Stack {
     foreignEntitiesTable.grantReadWriteData(orgsLambda);
     rawBucket.grantReadWrite(orgsLambda);
 
-    // Bedrock access for future AI receipt extraction
+    // Bedrock access for AI receipt & bill extraction (Nova & Claude Vision models)
     orgsLambda.addToRolePolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
-      resources: ['arn:aws:bedrock:ap-southeast-2::foundation-model/amazon.nova-lite-*'],
+      resources: ['*'],
     }));
 
     // Cognito Identity Provider access for Staff Management API (Admin Create/Delete/Get/List)
@@ -161,7 +188,13 @@ export class CdkStack extends cdk.Stack {
     const fnUrl = orgsLambda.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
       cors: {
-        allowedOrigins: ['*'],
+        allowedOrigins: [
+          'http://localhost:5173',
+          'http://localhost:3000',
+          'http://localhost:4173',
+          'http://127.0.0.1:5173',
+          ...(process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : []),
+        ],
         allowedHeaders: ['content-type', 'authorization', 'x-api-key'],
         allowedMethods: [lambda.HttpMethod.ALL],
       },

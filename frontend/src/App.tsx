@@ -485,7 +485,7 @@ export default function App() {
             path="/bills"
             element={
               <AppLayout onLogout={handleLogout}>
-                <BillsPage />
+                <BillsPage orgs={orgs} />
               </AppLayout>
             }
           />

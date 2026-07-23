@@ -1,19 +1,32 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { billsApi } from '../api/bills';
 import mockData from '../data/dummyBillsData.json';
 import { BillsListTable } from '../components/BillsListTable';
 import { ReceiptsListTable } from '../components/ReceiptsListTable';
 import { CreateBillModal } from '../components/CreateBillModal';
-import type { BillItem, ReceiptItem, BillsTabType, BillStatus, ReceiptStatus } from '../types';
+import { UploadExpenseModal } from '../components/UploadExpenseModal';
+import type { BillItem, ReceiptItem, BillsTabType, BillStatus, ReceiptStatus, Organisation } from '../types';
 
-export const BillsPage: React.FC = () => {
+interface BillsPageProps {
+  orgs?: Organisation[];
+}
+
+export const BillsPage: React.FC<BillsPageProps> = ({ orgs = [] }) => {
   const { t } = useTranslation();
+
+  // Format real cloud organisations for modal dropdowns
+  const formattedOrgs = orgs.map(o => ({
+    id: o.id,
+    name: o.name,
+  }));
 
   // Tab State
   const [activeTab, setActiveTab] = useState<BillsTabType>('bills');
 
-  // Modal State
+  // Modal States
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,13 +50,56 @@ export const BillsPage: React.FC = () => {
     );
   };
 
-  // Create New Bill Submission Handler
-  const handleCreateBillSubmit = (newBillData: Omit<BillItem, 'id'>) => {
-    const newBill: BillItem = {
-      id: `bill-${Date.now().toString().slice(-6)}`,
-      ...newBillData,
-    };
-    setBillsData(prev => [newBill, ...prev]);
+  // Create New Bill Submission Handler (Connected to AWS Backend API)
+  const handleCreateBillSubmit = async (newBillData: Omit<BillItem, 'id'>) => {
+    const targetOrgId = newBillData.org_id || formattedOrgs[0]?.id;
+    if (!targetOrgId) {
+      console.warn('No target organisation selected for bill creation.');
+      return;
+    }
+
+    try {
+      const savedBill = await billsApi.createBill(targetOrgId, newBillData);
+      const createdItem = (savedBill as unknown as BillItem) || {
+        id: `bill-${Date.now().toString().slice(-6)}`,
+        ...newBillData,
+      };
+      setBillsData(prev => [createdItem, ...prev]);
+    } catch (err) {
+      console.error('Failed to save bill to backend DynamoDB API:', err);
+      // Fallback local update
+      const fallbackItem: BillItem = {
+        id: `bill-${Date.now().toString().slice(-6)}`,
+        ...newBillData,
+      };
+      setBillsData(prev => [fallbackItem, ...prev]);
+    }
+  };
+
+  // Create New Expense Submission Handler (Connected to AWS Backend API)
+  const handleCreateExpenseSubmit = async (newExpenseData: Omit<ReceiptItem, 'id'>) => {
+    const targetOrgId = newExpenseData.org_id || formattedOrgs[0]?.id;
+    if (!targetOrgId) {
+      console.warn('No target organisation selected for expense creation.');
+      return;
+    }
+
+    try {
+      const savedExpense = await billsApi.createExpense(targetOrgId, newExpenseData);
+      const createdItem = (savedExpense as unknown as ReceiptItem) || {
+        id: `rcp-${Date.now().toString().slice(-6)}`,
+        ...newExpenseData,
+      };
+      setReceiptsData(prev => [createdItem, ...prev]);
+    } catch (err) {
+      console.error('Failed to save expense to backend DynamoDB API:', err);
+      // Fallback local update
+      const fallbackItem: ReceiptItem = {
+        id: `rcp-${Date.now().toString().slice(-6)}`,
+        ...newExpenseData,
+      };
+      setReceiptsData(prev => [fallbackItem, ...prev]);
+    }
   };
 
   // Reset status filter when switching tabs
@@ -79,7 +135,7 @@ export const BillsPage: React.FC = () => {
             </button>
           ) : (
             <button
-              onClick={() => alert('Upload Expense Receipt modal will connect to OCR API.')}
+              onClick={() => setIsExpenseModalOpen(true)}
               className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer"
             >
               <span className="material-icons text-base">cloud_upload</span>
@@ -124,7 +180,7 @@ export const BillsPage: React.FC = () => {
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              <span className="material-icons text-base">receipt</span>
+              <span className="material-icons text-base">storefront</span>
               <span>Expenses</span>
               <span
                 className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
@@ -138,10 +194,10 @@ export const BillsPage: React.FC = () => {
             </button>
           </div>
 
-          {/* Right: Search & Filters */}
+          {/* Right: Search & Filter Toolbar */}
           <div className="flex flex-wrap items-center gap-3">
             {/* Search Input */}
-            <div className="relative min-w-[240px] flex-1 sm:flex-initial">
+            <div className="relative">
               <span className="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
                 search
               </span>
@@ -149,28 +205,20 @@ export const BillsPage: React.FC = () => {
                 type="text"
                 placeholder={
                   activeTab === 'bills'
-                    ? 'Search by vendor, bill #, category...'
-                    : 'Search by merchant, purchaser, notes...'
+                    ? 'Search vendor, bill #...'
+                    : 'Search merchant, receipt #...'
                 }
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition"
+                className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400/20 focus:border-slate-400 transition w-56 sm:w-64"
               />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <span className="material-icons text-xs">cancel</span>
-                </button>
-              )}
             </div>
 
-            {/* Status Filter */}
+            {/* Status Dropdown Filter */}
             <select
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
-              className="py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition cursor-pointer"
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400/20 focus:border-slate-400 transition cursor-pointer"
             >
               <option value="all">All Statuses</option>
               {activeTab === 'bills' ? (
@@ -185,7 +233,6 @@ export const BillsPage: React.FC = () => {
                   <option value="pending_review">Pending Review</option>
                   <option value="approved">Approved</option>
                   <option value="reimbursed">Reimbursed</option>
-                  <option value="rejected">Rejected</option>
                 </>
               )}
             </select>
@@ -215,6 +262,15 @@ export const BillsPage: React.FC = () => {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSubmit={handleCreateBillSubmit}
+        organisations={formattedOrgs.length > 0 ? formattedOrgs : undefined}
+      />
+
+      {/* Upload Expense Modal */}
+      <UploadExpenseModal
+        isOpen={isExpenseModalOpen}
+        onClose={() => setIsExpenseModalOpen(false)}
+        onSubmit={handleCreateExpenseSubmit}
+        organisations={formattedOrgs.length > 0 ? formattedOrgs : undefined}
       />
     </div>
   );

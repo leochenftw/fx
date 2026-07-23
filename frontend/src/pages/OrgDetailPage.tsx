@@ -57,13 +57,6 @@ export const OrgDetailPage: React.FC = () => {
   const [txError, setTxError] = useState<string | null>(null);
   const [aiUpdatingId, setAiUpdatingId] = useState<string | null>(null);
 
-  // Automatically sync active organisation context
-  useEffect(() => {
-    if (orgId) {
-      localStorage.setItem('active_org_id', orgId);
-    }
-  }, [orgId]);
-
   // Fetch real transaction lists and category configurations
   useEffect(() => {
     if (!orgId) return;

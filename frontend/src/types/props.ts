@@ -22,4 +22,5 @@ export type {
   BillsListTableProps,
   ReceiptsListTableProps,
   CreateBillModalProps,
+  UploadExpenseModalProps,
 } from './modules/bills';
